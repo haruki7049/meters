@@ -51,14 +51,15 @@ pub fn inner(comptime T: type, comptime N: type) type {
         ) ![]Note(T) {
             var events = try allocator.alloc(Note(T), self.notes.len);
 
-            const spb_val: f64 = @floatFromInt(tempo.spb(bpm, sample_rate));
+            // Keep the fractional frame of a beat, so longer notes do not accumulate its truncation.
+            const spb_val: f64 = tempo.samplesPerBeat(bpm, sample_rate);
 
             for (self.notes, 0..) |item, i| {
                 const note_val = if (@hasDecl(N, "add")) item.note.add(semitones) else item.note;
                 events[i] = .{
                     .position = .{ .bar = item.bar, .beat = item.beat },
                     .freq = @floatCast(S.gen(note_val)),
-                    .length = @intFromFloat(spb_val * item.duration_beats),
+                    .length = @intFromFloat(@round(spb_val * item.duration_beats)),
                     .volume = item.volume,
                 };
             }
@@ -134,6 +135,26 @@ test "Phrase toEventsTransposed shifts Pitch notes by semitones" {
     try std.testing.expectApproxEqRel(Pitch.gen(.{ .code = .c, .octave = 5 }), events[1].freq, 1e-4);
     try std.testing.expectEqual(@as(f64, 1.0), events[1].position.beat);
     try std.testing.expectEqual(@as(usize, 44100), events[1].length);
+}
+
+test "Phrase toEvents keeps the fractional samples per beat in note lengths" {
+    const allocator = std.testing.allocator;
+
+    const phrase = inner(f64, Pitch){
+        .name = "Fractional",
+        .notes = &[_]inner(f64, Pitch).RawNote{
+            .{ .note = .{ .code = .a, .octave = 4 }, .duration_beats = 2.0 },
+            .{ .beat = 2.0, .note = .{ .code = .a, .octave = 4 }, .duration_beats = 16.0 },
+        },
+    };
+
+    // 190 BPM, 44100 Hz => 13926.315... samples per beat.
+    // A truncated spb of 13926 would give 27852 and 222816.
+    const events = try phrase.toEvents(Pitch, allocator, 190, 44100);
+    defer allocator.free(events);
+
+    try std.testing.expectEqual(@as(usize, 27853), events[0].length); // 27852.63...
+    try std.testing.expectEqual(@as(usize, 222821), events[1].length); // 222821.05...
 }
 
 test "Phrase coerces from a ZON-shaped literal" {
