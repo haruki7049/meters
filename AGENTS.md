@@ -6,7 +6,7 @@ ______________________________________________________________________
 
 ## 1. Project Overview & Architecture
 
-`phrases` is a minimal music theory and score data structure library in Zig. It describes *when* and *at what pitch* a note sounds; it does not synthesize, mix, or write audio.
+`phrases` is a minimal score structure library in Zig. It describes *when* a note sounds and *for how long*; it does not know what a note is, and it does not synthesize, mix, or write audio.
 
 - **Pure Zig, `std` Only**: `build.zig.zon` has no dependencies, and it must stay that way. Do not add `lightmix` or any other package; audio belongs to the downstream libraries.
 - **Library Package**: The public module is registered as `phrases` via `b.addModule` in `build.zig`, so downstream projects consume it with `b.dependency("phrases", .{})`.
@@ -18,13 +18,13 @@ ______________________________________________________________________
   - `position.zig`: `Position` (0-indexed `bar`, `beat` offset) and `toSampleOffset`.
   - `time-signature.zig`: `TimeSignature` (`numerator` / `denominator`, defaults to 4/4).
   - `tempo.zig`: Samples-per-beat conversions (`samplesPerBeat`, `spb`).
-  - `pitch.zig`: `Pitch`, 12-tone equal temperament (`add` transposes, `gen` returns Hz with A4 = 440 Hz).
-  - `note.zig`: `Note(T)`, a note event with `position`, `freq`, `length` (sample frames) and `volume`.
-  - `phrase.zig`: `Phrase(T, N)`, a declarative phrase of raw notes resolved by `toEvents` / `toEventsTransposed`.
+  - `event.zig`: `Event(N)`, a time-placed event with `position`, `length` (sample frames) and a `note: N` payload.
+  - `phrase.zig`: `Phrase(N)`, a declarative phrase of raw notes placed in time by `toEvents`.
 - **Domain Conventions**:
   - BPM always counts quarter notes; `TimeSignature.denominator` scales the beat length (an 8th-note beat is half a quarter).
   - Bars are 0-indexed. `beat` is an `f64` offset within the bar.
   - Timing conversions compute in `f64` and convert to an integer frame once, at the end, with `@round`. Do not truncate, and do not round an intermediate value such as samples per beat before multiplying it.
+  - The note payload `N` is opaque: `phrases` passes it through from `RawNote` to `Event` and never inspects it. Do not add pitch, frequency, volume, instrument or other note semantics to `phrases`, and do not depend on a pitch library such as `pitches`; those belong in `N` and in the consumer.
   - Functions that allocate return memory the caller owns (e.g. `Phrase.toEvents`); document that in the doc comment.
 
 ______________________________________________________________________
@@ -64,12 +64,12 @@ ______________________________________________________________________
 
 - **Comments**: Every public declaration has a `///` doc comment, and every file starts with a `//!` comment that says what it contains. Comments are in English.
 - **Naming**:
-  - `PascalCase` for types and for files imported as a struct (`Position`, `TimeSignature`, `Pitch`).
-  - `camelCase` for functions and methods (`toSampleOffset`, `toEventsTransposed`).
+  - `PascalCase` for types and for files imported as a struct (`Position`, `TimeSignature`).
+  - `camelCase` for functions and methods (`toSampleOffset`, `toEvents`).
   - `snake_case` for variables, parameters, struct fields and enum tags (`sample_rate`, `duration_beats`, `.cs`).
-  - Comptime type parameters are always a single uppercase character (`T` for the sample type, `N` for the pitch type, `S` for the scale that resolves `N` to Hz). Multi-character names such as `comptime SampleType: type` are prohibited.
-  - Error tags are `PascalCase` (`error.InvalidPosition`, `error.InvalidBpm`).
-- **Generic Factories**: A type parameterized by comptime types is defined as `pub fn inner(...) type` in its own file and re-exported under its `PascalCase` name in `root.zig` (`pub const Note = @import("./note.zig").inner;`).
+  - Comptime type parameters are always a single uppercase character (`N` for the note payload type). Multi-character names such as `comptime SampleType: type` are prohibited.
+  - Error tags are `PascalCase` (`error.InvalidPosition`, `error.InvalidBpm`, `error.InvalidDuration`).
+- **Generic Factories**: A type parameterized by comptime types is defined as `pub fn inner(...) type` in its own file and re-exported under its `PascalCase` name in `root.zig` (`pub const Event = @import("./event.zig").inner;`).
 - **Tests**: Keep tests next to the code they cover, in the same file. Every file ends with `test { std.testing.refAllDecls(@This()); }`. A test that checks a numeric result states the expected value and how it was derived in a comment (e.g. `// 60 BPM, 44100 Hz => spb = 44100`).
 - **Validation**: Reject invalid input with an error instead of reaching undefined or panicking behavior (e.g. `toSampleOffset` returns `error.InvalidPosition`, `error.InvalidBpm` and `error.InvalidTimeSignature`).
 

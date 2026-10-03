@@ -1,16 +1,15 @@
-//! Minimal music theory and score data structures.
+//! Minimal score structure: positions, time signatures, tempo conversion, and declarative
+//! phrases placed in time as events.
 //!
-//! Pure Zig (std only): pitches, notes, positions, time signatures, tempo conversion,
-//! and declarative phrases that resolve into frequency-annotated note events.
+//! Pure Zig (std only). `phrases` handles only time and placement: what a note is and how it
+//! sounds are left to the consumer, through the payload type of `Phrase(N)` and `Event(N)`.
 
 const std = @import("std");
 
-/// Note event with position, frequency, length in sample frames, and volume.
-pub const Note = @import("./note.zig").inner;
-/// Declarative phrase of raw notes, parameterized by sample type T and pitch type N.
+/// Time-placed event with a position, a length in sample frames, and a note payload of type N.
+pub const Event = @import("./event.zig").inner;
+/// Declarative phrase of raw notes whose payload is of type N.
 pub const Phrase = @import("./phrase.zig").inner;
-/// 12-tone equal temperament pitch (pitch class code and octave).
-pub const Pitch = @import("./pitch.zig");
 /// Musical position by bar and beat offsets.
 pub const Position = @import("./position.zig");
 /// Time signature (numerator / denominator).
@@ -20,9 +19,8 @@ pub const tempo = @import("./tempo.zig");
 
 test {
     std.testing.refAllDecls(@This());
-    _ = @import("./note.zig");
+    _ = @import("./event.zig");
     _ = @import("./phrase.zig");
-    _ = @import("./pitch.zig");
     _ = @import("./position.zig");
     _ = @import("./tempo.zig");
     _ = @import("./time-signature.zig");
