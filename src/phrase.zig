@@ -2,6 +2,8 @@
 
 const std = @import("std");
 const Event = @import("./event.zig").inner;
+const Position = @import("./position.zig");
+const TimeSignature = @import("./time-signature.zig");
 const tempo = @import("./tempo.zig");
 
 /// Returns a Phrase type whose notes carry a payload of type N.
@@ -17,9 +19,9 @@ pub fn inner(comptime N: type) type {
         pub const RawNote = struct {
             /// 0-indexed bar the note starts in.
             bar: usize = 0,
-            /// Beat offset within the bar.
+            /// Beat offset within the bar; must be finite and not negative.
             beat: f64 = 0.0,
-            /// Length in beats; must be finite and not negative.
+            /// Length in beats of the time signature; must be finite and not negative.
             duration_beats: f64 = 1.0,
             /// The note payload, passed through to the event unchanged.
             note: N,
@@ -27,36 +29,40 @@ pub fn inner(comptime N: type) type {
 
         /// Errors `toEvents` returns.
         pub const ToEventsError = error{
-            /// `bpm` is zero.
-            InvalidBpm,
             /// A `duration_beats` is NaN, negative, infinite, or longer than a `usize` counts in frames.
             InvalidDuration,
-        } || std.mem.Allocator.Error;
+        } || Position.ToSampleOffsetError || std.mem.Allocator.Error;
 
         name: []const u8,
         notes: []const RawNote,
 
         /// Places every note in time: its position, and its length in sample frames rounded to
         /// the nearest frame. Each note payload is passed through unchanged.
+        ///
+        /// Lengths use the same beat as positions: a beat of `time_signature`, so in 6/8 one
+        /// `duration_beats` is an 8th note. Every returned event's position converts with
+        /// `Position.toSampleOffset` and the same `bpm`, `time_signature` and `sample_rate`.
         /// The caller owns the returned slice.
         pub fn toEvents(
             self: Self,
             allocator: std.mem.Allocator,
             bpm: usize,
+            time_signature: TimeSignature,
             sample_rate: u32,
         ) ToEventsError![]Event(N) {
-            if (bpm == 0) return error.InvalidBpm;
+            // Keep the fractional frame of a beat, so longer notes do not accumulate its truncation.
+            const spb = try tempo.samplesPerBeat(bpm, time_signature, sample_rate);
 
             const events = try allocator.alloc(Event(N), self.notes.len);
             errdefer allocator.free(events);
 
-            // Keep the fractional frame of a beat, so longer notes do not accumulate its truncation.
-            const spb_val: f64 = tempo.samplesPerBeat(bpm, sample_rate);
-
             for (self.notes, events) |item, *event| {
+                const position: Position = .{ .bar = item.bar, .beat = item.beat };
+                // Rejects a position that toSampleOffset would reject, so no invalid event leaves here.
+                _ = try position.toSampleOffset(bpm, time_signature, sample_rate);
                 event.* = .{
-                    .position = .{ .bar = item.bar, .beat = item.beat },
-                    .length = try frames(spb_val, item.duration_beats),
+                    .position = position,
+                    .length = tempo.framesFromBeats(item.duration_beats, spb) orelse return error.InvalidDuration,
                     .note = item.note,
                 };
             }
@@ -64,19 +70,6 @@ pub fn inner(comptime N: type) type {
             return events;
         }
     };
-}
-
-/// The first frame count a `usize` cannot hold, 2^bits.
-const frame_limit: f64 = std.math.ldexp(@as(f64, 1.0), @bitSizeOf(usize));
-
-/// Converts a duration in beats to sample frames, rounded to the nearest frame.
-fn frames(spb: f64, duration_beats: f64) error{InvalidDuration}!usize {
-    // Written as a negation so that NaN, for which every comparison is false, is rejected too.
-    if (!(duration_beats >= 0.0)) return error.InvalidDuration;
-    const value = @round(spb * duration_beats);
-    // Rejects infinity and lengths beyond what a usize counts.
-    if (!(value < frame_limit)) return error.InvalidDuration;
-    return @intFromFloat(value);
 }
 
 /// A pitch-like payload for the tests; `phrases` itself knows no pitch type.
@@ -97,7 +90,7 @@ test "Phrase toEvents places notes in time and passes the payload through" {
     };
 
     // 60 BPM, 44100 Hz => spb = 44100
-    const events = try phrase.toEvents(allocator, 60, 44100);
+    const events = try phrase.toEvents(allocator, 60, .{}, 44100);
     defer allocator.free(events);
 
     try std.testing.expectEqual(@as(usize, 2), events.len);
@@ -126,7 +119,7 @@ test "Phrase toEvents keeps the fractional samples per beat in note lengths" {
 
     // 190 BPM, 44100 Hz => 13926.315... samples per beat.
     // A truncated spb of 13926 would give 27852 and 222816.
-    const events = try phrase.toEvents(allocator, 190, 44100);
+    const events = try phrase.toEvents(allocator, 190, .{}, 44100);
     defer allocator.free(events);
 
     try std.testing.expectEqual(@as(usize, 27853), events[0].length); // 27852.63...
@@ -146,7 +139,7 @@ test "Phrase accepts any payload type, such as a drum voice" {
     };
 
     // 120 BPM, 44100 Hz => spb = 22050, so a quarter beat is 5512.5 frames, rounded to 5513
-    const events = try phrase.toEvents(allocator, 120, 44100);
+    const events = try phrase.toEvents(allocator, 120, .{}, 44100);
     defer allocator.free(events);
 
     try std.testing.expectEqual(Drum.kick, events[0].note);
@@ -166,7 +159,7 @@ test "Phrase payload carries what used to be fixed fields" {
         },
     };
 
-    const events = try phrase.toEvents(allocator, 120, 44100);
+    const events = try phrase.toEvents(allocator, 120, .{}, 44100);
     defer allocator.free(events);
 
     try std.testing.expectEqual(@as(usize, 5), events[0].note.string);
@@ -191,7 +184,7 @@ test "Phrase coerces from a ZON-shaped literal" {
 test "Phrase toEvents returns an empty slice for an empty phrase" {
     const allocator = std.testing.allocator;
     const phrase = inner(TestPitch){ .name = "Empty", .notes = &.{} };
-    const events = try phrase.toEvents(allocator, 120, 44100);
+    const events = try phrase.toEvents(allocator, 120, .{}, 44100);
     defer allocator.free(events);
     try std.testing.expectEqual(@as(usize, 0), events.len);
 }
@@ -201,7 +194,7 @@ test "Phrase toEvents accepts a zero duration" {
     const phrase = inner(TestPitch){ .name = "Zero", .notes = &.{
         .{ .note = .{ .code = .c, .octave = 4 }, .duration_beats = 0.0 },
     } };
-    const events = try phrase.toEvents(allocator, 120, 44100);
+    const events = try phrase.toEvents(allocator, 120, .{}, 44100);
     defer allocator.free(events);
     try std.testing.expectEqual(@as(usize, 0), events[0].length);
 }
@@ -210,7 +203,7 @@ test "Phrase toEvents rejects a zero bpm" {
     const phrase = inner(TestPitch){ .name = "Bpm", .notes = &.{
         .{ .note = .{ .code = .c, .octave = 4 } },
     } };
-    try std.testing.expectError(error.InvalidBpm, phrase.toEvents(std.testing.allocator, 0, 44100));
+    try std.testing.expectError(error.InvalidBpm, phrase.toEvents(std.testing.allocator, 0, .{}, 44100));
 }
 
 test "Phrase toEvents rejects invalid durations without leaking" {
@@ -230,7 +223,84 @@ test "Phrase toEvents rejects invalid durations without leaking" {
             .{ .note = .{ .code = .c, .octave = 4 } },
             .{ .beat = 1.0, .note = .{ .code = .e, .octave = 4 }, .duration_beats = duration },
         } };
-        try std.testing.expectError(error.InvalidDuration, phrase.toEvents(std.testing.allocator, 120, 44100));
+        try std.testing.expectError(error.InvalidDuration, phrase.toEvents(std.testing.allocator, 120, .{}, 44100));
+    }
+}
+
+test "Phrase toEvents measures lengths in beats of the time signature" {
+    const allocator = std.testing.allocator;
+
+    // One-beat notes on beats 0, 1 and 2: each must end exactly where the next one starts.
+    const phrase = inner(TestPitch){ .name = "Meter", .notes = &.{
+        .{ .beat = 0.0, .note = .{ .code = .c, .octave = 4 } },
+        .{ .beat = 1.0, .note = .{ .code = .e, .octave = 4 } },
+        .{ .beat = 2.0, .note = .{ .code = .g, .octave = 4 } },
+    } };
+
+    const meters = [_]TimeSignature{
+        .{ .numerator = 4, .denominator = 4 },
+        .{ .numerator = 3, .denominator = 4 },
+        .{ .numerator = 6, .denominator = 8 },
+        .{ .numerator = 12, .denominator = 8 },
+        .{ .numerator = 2, .denominator = 2 },
+        .{ .numerator = 4, .denominator = 7 },
+    };
+    for (meters) |meter| {
+        inline for (.{ 60, 120, 190 }) |bpm| {
+            const events = try phrase.toEvents(allocator, bpm, meter, 44100);
+            defer allocator.free(events);
+            for (events[0 .. events.len - 1], events[1..]) |current, next| {
+                const start = try current.position.toSampleOffset(bpm, meter, 44100);
+                const next_start = try next.position.toSampleOffset(bpm, meter, 44100);
+                // Both round to the nearest frame, so they may differ by one.
+                const end = start + current.length;
+                try std.testing.expect(@max(end, next_start) - @min(end, next_start) <= 1);
+            }
+        }
+    }
+}
+
+test "Phrase toEvents in 6/8 gives an 8th-note beat" {
+    const allocator = std.testing.allocator;
+    const phrase = inner(TestPitch){ .name = "SixEight", .notes = &.{
+        .{ .note = .{ .code = .c, .octave = 4 }, .duration_beats = 1.0 },
+        .{ .beat = 1.0, .note = .{ .code = .e, .octave = 4 }, .duration_beats = 3.0 },
+    } };
+    // 60 BPM, 44100 Hz, 6/8: a beat is 44100 * 4/8 = 22050 frames
+    const events = try phrase.toEvents(allocator, 60, .{ .numerator = 6, .denominator = 8 }, 44100);
+    defer allocator.free(events);
+    try std.testing.expectEqual(@as(usize, 22050), events[0].length);
+    // 3 beats = 3 * 22050 = 66150, half a bar
+    try std.testing.expectEqual(@as(usize, 66150), events[1].length);
+}
+
+test "Phrase toEvents rejects invalid timing parameters" {
+    const phrase = inner(TestPitch){ .name = "Timing", .notes = &.{
+        .{ .note = .{ .code = .c, .octave = 4 } },
+    } };
+    const allocator = std.testing.allocator;
+    try std.testing.expectError(error.InvalidSampleRate, phrase.toEvents(allocator, 120, .{}, 0));
+    try std.testing.expectError(error.InvalidTimeSignature, phrase.toEvents(allocator, 120, .{ .numerator = 0 }, 44100));
+    try std.testing.expectError(error.InvalidTimeSignature, phrase.toEvents(allocator, 120, .{ .denominator = 0 }, 44100));
+}
+
+test "Phrase toEvents rejects invalid positions without leaking" {
+    const Case = struct { bar: usize, beat: f64 };
+    const invalid = [_]Case{
+        .{ .bar = 0, .beat = -1.0 },
+        .{ .bar = 0, .beat = std.math.nan(f64) },
+        .{ .bar = 0, .beat = std.math.inf(f64) },
+        .{ .bar = 0, .beat = -std.math.inf(f64) },
+        // An offset beyond what a usize holds
+        .{ .bar = std.math.maxInt(usize), .beat = 0.0 },
+    };
+    for (invalid) |case| {
+        // The invalid note comes second, after the slice is allocated.
+        const phrase = inner(TestPitch){ .name = "Position", .notes = &.{
+            .{ .note = .{ .code = .c, .octave = 4 } },
+            .{ .bar = case.bar, .beat = case.beat, .note = .{ .code = .e, .octave = 4 } },
+        } };
+        try std.testing.expectError(error.InvalidPosition, phrase.toEvents(std.testing.allocator, 120, .{}, 44100));
     }
 }
 
