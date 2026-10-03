@@ -19,7 +19,8 @@ pub fn inner(comptime N: type) type {
         pub const RawNote = struct {
             /// 0-indexed bar the note starts in.
             bar: usize = 0,
-            /// Beat offset within the bar; must be finite and not negative.
+            /// Beat offset from the start of `bar`; must be finite and not negative. A beat at or past
+            /// the numerator carries into the following bars, as in `Position.beat`.
             beat: f64 = 0.0,
             /// Length in beats of the time signature; must be finite and not negative.
             duration_beats: f64 = 1.0,
@@ -36,13 +37,19 @@ pub fn inner(comptime N: type) type {
         name: []const u8,
         notes: []const RawNote,
 
-        /// Places every note in time: its position, and its length in sample frames rounded to
-        /// the nearest frame. Each note payload is passed through unchanged.
+        /// Places every note in time: its position, and its length in sample frames. Each note
+        /// payload is passed through unchanged.
         ///
-        /// Lengths use the same beat as positions: a beat of `time_signature`, so in 6/8 one
-        /// `duration_beats` is an 8th note. Every returned event's position converts with
-        /// `Position.toSampleOffset` and the same `bpm`, `time_signature` and `sample_rate`.
-        /// The caller owns the returned slice.
+        /// A length is the offset of the note's end (`beat + duration_beats`) minus the offset of
+        /// its start, both from `Position.toSampleOffset`. Lengths therefore use the same beat as
+        /// positions (a beat of `time_signature`, so in 6/8 one `duration_beats` is an 8th note),
+        /// and a note whose end beat equals the next note's start beat tiles with it exactly: no
+        /// frame of gap or overlap, whatever the rounding. The beats are compared as `f64`, so on
+        /// a binary grid (halves, quarters, 16ths, ...) back-to-back notes always tile; on a grid
+        /// such as triplets, `beat + duration_beats` can differ from the next beat in the last bit
+        /// and, rarely, leave one frame of gap or overlap. Every returned event's position
+        /// converts with `Position.toSampleOffset` and the same `bpm`, `time_signature` and
+        /// `sample_rate`. The caller owns the returned slice.
         pub fn toEvents(
             self: Self,
             allocator: std.mem.Allocator,
@@ -50,8 +57,8 @@ pub fn inner(comptime N: type) type {
             time_signature: TimeSignature,
             sample_rate: u32,
         ) ToEventsError![]Event(N) {
-            // Keep the fractional frame of a beat, so longer notes do not accumulate its truncation.
-            const spb = try tempo.samplesPerBeat(bpm, time_signature, sample_rate);
+            // Validate the timing parameters even when there are no notes.
+            _ = try tempo.samplesPerBeat(bpm, time_signature, sample_rate);
 
             const events = try allocator.alloc(Event(N), self.notes.len);
             errdefer allocator.free(events);
@@ -59,10 +66,22 @@ pub fn inner(comptime N: type) type {
             for (self.notes, events) |item, *event| {
                 const position: Position = .{ .bar = item.bar, .beat = item.beat };
                 // Rejects a position that toSampleOffset would reject, so no invalid event leaves here.
-                _ = try position.toSampleOffset(bpm, time_signature, sample_rate);
+                const start = try position.toSampleOffset(bpm, time_signature, sample_rate);
+
+                // Written as a negation so that NaN is rejected too.
+                if (!(item.duration_beats >= 0.0 and std.math.isFinite(item.duration_beats))) return error.InvalidDuration;
+                // The end carries past the bar like any beat. The start is valid, so an end too far
+                // to have an offset is the duration's fault.
+                const end_position: Position = .{ .bar = item.bar, .beat = item.beat + item.duration_beats };
+                const end = end_position.toSampleOffset(bpm, time_signature, sample_rate) catch |err| switch (err) {
+                    error.InvalidPosition => return error.InvalidDuration,
+                    else => |e| return e,
+                };
+
                 event.* = .{
                     .position = position,
-                    .length = tempo.framesFromBeats(item.duration_beats, spb) orelse return error.InvalidDuration,
+                    // Rounding is monotonic and duration_beats is not negative, so end >= start.
+                    .length = end - start,
                     .note = item.note,
                 };
             }
@@ -166,6 +185,27 @@ test "Phrase payload carries what used to be fixed fields" {
     try std.testing.expectEqual(@as(f64, 0.8), events[0].note.volume);
 }
 
+test "Phrase imports a ZON file" {
+    const allocator = std.testing.allocator;
+    const phrase: inner(TestPitch) = @import("./test-phrase.zon");
+
+    try std.testing.expectEqualStrings("TestZon", phrase.name);
+    try std.testing.expectEqual(@as(usize, 3), phrase.notes.len);
+    // Omitted fields take their defaults.
+    try std.testing.expectEqual(@as(usize, 0), phrase.notes[1].bar);
+    try std.testing.expectEqual(@as(f64, 0.0), phrase.notes[1].beat);
+    try std.testing.expectEqual(@as(f64, 1.0), phrase.notes[1].duration_beats);
+    try std.testing.expectEqual(TestPitch{ .code = .a, .octave = -1 }, phrase.notes[2].note);
+
+    // 120 BPM, 4/4, 44100 Hz => a beat is 22050 frames
+    const events = try phrase.toEvents(allocator, 120, .{}, 44100);
+    defer allocator.free(events);
+    // bar 1 beat 5 = 4 + 5 = 9 beats = 198450 frames, the same as bar 2 beat 1
+    try std.testing.expectEqual(@as(usize, 198450), try events[2].position.toSampleOffset(120, .{}, 44100));
+    // 0.5 beats = 11025 frames
+    try std.testing.expectEqual(@as(usize, 11025), events[2].length);
+}
+
 test "Phrase coerces from a ZON-shaped literal" {
     // Mirrors how a `phrase.zon` file is imported as `Phrase(N)` at comptime.
     const phrase: inner(TestPitch) = .{
@@ -252,12 +292,56 @@ test "Phrase toEvents measures lengths in beats of the time signature" {
             for (events[0 .. events.len - 1], events[1..]) |current, next| {
                 const start = try current.position.toSampleOffset(bpm, meter, 44100);
                 const next_start = try next.position.toSampleOffset(bpm, meter, 44100);
-                // Both round to the nearest frame, so they may differ by one.
-                const end = start + current.length;
-                try std.testing.expect(@max(end, next_start) - @min(end, next_start) <= 1);
+                try std.testing.expectEqual(next_start, start + current.length);
             }
         }
     }
+}
+
+test "Phrase toEvents tiles back-to-back notes with no gap or overlap" {
+    const allocator = std.testing.allocator;
+
+    // 16th notes back to back over 4 bars of 4/4. A 16th has a fractional frame count at these
+    // tempos (5512.5 frames at 120 BPM), so a length rounded on its own would make every other
+    // note overlap the next by a frame.
+    var notes: [64]inner(TestPitch).RawNote = undefined;
+    for (&notes, 0..) |*n, i| n.* = .{
+        .bar = i / 16,
+        .beat = @as(f64, @floatFromInt(i % 16)) * 0.25,
+        .duration_beats = 0.25,
+        .note = .{ .code = .c, .octave = 4 },
+    };
+    const phrase = inner(TestPitch){ .name = "Sixteenths", .notes = &notes };
+
+    inline for (.{ 60, 120, 140, 190, 200 }) |bpm| {
+        inline for (.{ 44100, 48000 }) |sample_rate| {
+            const events = try phrase.toEvents(allocator, bpm, .{}, sample_rate);
+            defer allocator.free(events);
+            for (events[0 .. events.len - 1], events[1..]) |current, next| {
+                const start = try current.position.toSampleOffset(bpm, .{}, sample_rate);
+                const next_start = try next.position.toSampleOffset(bpm, .{}, sample_rate);
+                try std.testing.expectEqual(next_start, start + current.length);
+            }
+            // The lengths add up to the span of the phrase: 4 bars = 16 beats.
+            var total: usize = 0;
+            for (events) |event| total += event.length;
+            const span = try (Position{ .bar = 4 }).toSampleOffset(bpm, .{}, sample_rate);
+            try std.testing.expectEqual(span, total);
+        }
+    }
+}
+
+test "Phrase toEvents tiles a note whose end carries past the bar" {
+    const allocator = std.testing.allocator;
+    // A note from bar 0 beat 3 lasting 2.5 beats ends at bar 1 beat 1.5, where the next one starts.
+    const phrase = inner(TestPitch){ .name = "Carry", .notes = &.{
+        .{ .bar = 0, .beat = 3.0, .duration_beats = 2.5, .note = .{ .code = .c, .octave = 4 } },
+        .{ .bar = 1, .beat = 1.5, .note = .{ .code = .e, .octave = 4 } },
+    } };
+    const events = try phrase.toEvents(allocator, 190, .{}, 44100);
+    defer allocator.free(events);
+    const start = try events[0].position.toSampleOffset(190, .{}, 44100);
+    try std.testing.expectEqual(try events[1].position.toSampleOffset(190, .{}, 44100), start + events[0].length);
 }
 
 test "Phrase toEvents in 6/8 gives an 8th-note beat" {

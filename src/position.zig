@@ -8,7 +8,9 @@ const Self = @This();
 
 /// 0-indexed measure/bar number.
 bar: usize = 0,
-/// Beat offset within the bar; must be finite and not negative.
+/// Beat offset from the start of `bar`; must be finite and not negative. A beat at or past the
+/// numerator of the time signature carries into the following bars: in 4/4, bar 0 beat 5 is the
+/// same position as bar 1 beat 1.
 beat: f64 = 0.0,
 
 /// Errors `toSampleOffset` returns.
@@ -20,12 +22,12 @@ pub const ToSampleOffsetError = error{
 /// Calculate the sample frame offset given BPM, Time Signature, and sample rate.
 /// BPM is defined relative to quarter notes (denominator = 4).
 /// The offset is rounded to the nearest frame.
-pub fn toSampleOffset(self: Self, bpm: usize, time_sig: TimeSignature, sample_rate: u32) ToSampleOffsetError!usize {
+pub fn toSampleOffset(self: Self, bpm: usize, time_signature: TimeSignature, sample_rate: u32) ToSampleOffsetError!usize {
     // Written as a negation so that NaN is rejected too; infinity is caught below.
     if (!(self.beat >= 0.0)) return error.InvalidPosition;
 
-    const spb = try tempo.samplesPerBeat(bpm, time_sig, sample_rate);
-    const num_f: f64 = @floatFromInt(time_sig.numerator);
+    const spb = try tempo.samplesPerBeat(bpm, time_signature, sample_rate);
+    const num_f: f64 = @floatFromInt(time_signature.numerator);
     const total_beats: f64 = (@as(f64, @floatFromInt(self.bar)) * num_f) + self.beat;
 
     // Round instead of truncating: a product that lands just below an integer (e.g. 44099.99...)
@@ -45,22 +47,22 @@ test "Position toSampleOffset 4/4 meter" {
 
 test "Position toSampleOffset 6/8 meter" {
     const pos = Self{ .bar = 1, .beat = 0.0 };
-    const time_sig = TimeSignature{ .numerator = 6, .denominator = 8 };
+    const time_signature = TimeSignature{ .numerator = 6, .denominator = 8 };
     // 60 BPM, 44100 Hz, 6/8 meter
     // quarter note = 44100 samples
     // 8th note beat = 44100 * (4/8) = 22050 samples
     // 1 bar = 6 beats = 6 * 22050 = 132300 samples
-    const offset = try pos.toSampleOffset(60, time_sig, 44100);
+    const offset = try pos.toSampleOffset(60, time_signature, 44100);
     try std.testing.expectEqual(@as(usize, 132300), offset);
 }
 
 test "Position toSampleOffset 4/7 meter" {
     const pos = Self{ .bar = 1, .beat = 0.0 };
-    const time_sig = TimeSignature{ .numerator = 4, .denominator = 7 };
+    const time_signature = TimeSignature{ .numerator = 4, .denominator = 7 };
     // 60 BPM, 44100 Hz, 4/7 meter
     // 1 beat = 44100 * (4/7) = 25200 samples
     // 1 bar = 4 beats = 4 * 25200 = 100800 samples
-    const offset = try pos.toSampleOffset(60, time_sig, 44100);
+    const offset = try pos.toSampleOffset(60, time_signature, 44100);
     try std.testing.expectEqual(@as(usize, 100800), offset);
 }
 
@@ -122,6 +124,20 @@ test "Position toSampleOffset rejects infinite beats and offsets beyond a usize"
     try std.testing.expectError(error.InvalidPosition, (Self{ .bar = std.math.maxInt(usize) }).toSampleOffset(120, .{}, 44100));
     // A finite beat whose offset overflows: 1e300 beats.
     try std.testing.expectError(error.InvalidPosition, (Self{ .beat = 1e300 }).toSampleOffset(120, .{}, 44100));
+}
+
+test "Position toSampleOffset carries beats past the bar into the following bars" {
+    // 4/4: bar 0 beat 5 = bar 1 beat 1 = 5 beats
+    try std.testing.expectEqual(
+        try (Self{ .bar = 1, .beat = 1.0 }).toSampleOffset(120, .{}, 44100),
+        try (Self{ .bar = 0, .beat = 5.0 }).toSampleOffset(120, .{}, 44100),
+    );
+    // 6/8: bar 1 beat 13 = bar 3 beat 1 = 19 beats
+    const six_eight = TimeSignature{ .numerator = 6, .denominator = 8 };
+    try std.testing.expectEqual(
+        try (Self{ .bar = 3, .beat = 1.0 }).toSampleOffset(120, six_eight, 44100),
+        try (Self{ .bar = 1, .beat = 13.0 }).toSampleOffset(120, six_eight, 44100),
+    );
 }
 
 test "Position toSampleOffset invalid sample rate" {

@@ -1,0 +1,12 @@
+// A phrase for the ZON import test in phrase.zig, written the way a consumer writes `phrase.zon`.
+.{
+    .name = "TestZon",
+    .notes = .{
+        // Every field written out
+        .{ .bar = 0, .beat = 0.0, .duration_beats = 1.0, .note = .{ .code = .c, .octave = 4 } },
+        // bar, beat and duration_beats left at their defaults (0, 0.0, 1.0)
+        .{ .note = .{ .code = .e, .octave = 4 } },
+        // A negative octave in the payload, and a beat past the bar (bar 1 beat 5 is bar 2 beat 1 in 4/4)
+        .{ .bar = 1, .beat = 5.0, .duration_beats = 0.5, .note = .{ .code = .a, .octave = -1 } },
+    },
+}
