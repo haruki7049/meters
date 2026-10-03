@@ -1,16 +1,16 @@
-# Agent Guidelines for `phrases`
+# Agent Guidelines for `meters`
 
-This document defines core principles, architectural invariants, and non-negotiable safety rules for AI agents working on the `phrases` repository.
+This document defines core principles, architectural invariants, and non-negotiable safety rules for AI agents working on the `meters` repository.
 
 ______________________________________________________________________
 
 ## 1. Project Overview & Architecture
 
-`phrases` is a minimal score structure library in Zig. It describes *when* a note sounds and *for how long*; it does not know what a note is, and it does not synthesize, mix, or write audio.
+`meters` is a minimal score structure library in Zig. It describes *when* a note sounds and *for how long*; it does not know what a note is, and it does not synthesize, mix, or write audio.
 
 - **Pure Zig, `std` Only**: `build.zig.zon` has no dependencies, and it must stay that way. Do not add `lightmix` or any other package; audio belongs to the downstream libraries.
-- **Library Package**: The public module is registered as `phrases` via `b.addModule` in `build.zig`, so downstream projects consume it with `b.dependency("phrases", .{})`.
-- **Downstream Consumers**: [`resonator`](https://github.com/haruki7049/resonator), [`sequencer`](https://github.com/haruki7049/sequencer) and [`pulse`](https://github.com/haruki7049/pulse) depend on `phrases` and pin it to a commit hash in their `build.zig.zon`. A change here reaches them only when they bump that pin, and they test that `phrases.Position` and `phrases.TimeSignature` resolve to one shared type. Treat a change to a public type's fields, a function signature, or a numeric result (such as the frame `Position.toSampleOffset` returns) as a breaking change, and state it in the PR description.
+- **Library Package**: The public module is registered as `meters` via `b.addModule` in `build.zig`, so downstream projects consume it with `b.dependency("meters", .{})`.
+- **Downstream Consumers**: [`resonator`](https://github.com/haruki7049/resonator), [`sequencer`](https://github.com/haruki7049/sequencer) and [`pulse`](https://github.com/haruki7049/pulse) depend on `meters` and pin it to a commit hash in their `build.zig.zon` (until they move past the rename, as the `phrases` package at a pre-rename commit; GitHub redirects the old repository URL). A change here reaches them only when they bump that pin, and they test that `meters.Position` and `meters.TimeSignature` resolve to one shared type. Treat a change to a public type's fields, a function signature, or a numeric result (such as the frame `Position.toSampleOffset` returns) as a breaking change, and state it in the PR description.
 - **Target Language Version**: Zig `0.16.0`, matching the toolchain pinned in `flake.nix`.
 - **Development Environment**: Managed with Nix, `direnv`, and `nix-direnv`. Formatting across all languages is handled via `treefmt` (nixfmt, zig fmt, actionlint, mdformat, shellcheck, shfmt).
 - **Source Layout** (`src/`):
@@ -26,7 +26,7 @@ ______________________________________________________________________
   - An event length is the offset of its end minus the offset of its start (`toSampleOffset(beat + duration_beats) - toSampleOffset(beat)`), never a duration rounded on its own, so back-to-back notes tile with no frame of gap or overlap.
   - Timing conversions compute in `f64` and convert to an integer frame once, at the end, with `@round`. Do not truncate, and do not round an intermediate value such as samples per beat before multiplying it.
   - Positions and lengths use one beat, the beat of the time signature: every beat-to-frame conversion goes through `tempo.samplesPerBeat` and `tempo.framesFromBeats`. Do not compute a beat length or a frame count anywhere else, and do not change the order of operations in `samplesPerBeat`, which decides how offsets round.
-  - The note payload `N` is opaque: `phrases` passes it through from `RawNote` to `Event` and never inspects it. Do not add pitch, frequency, volume, instrument or other note semantics to `phrases`, and do not depend on a pitch library such as `pitches`; those belong in `N` and in the consumer.
+  - The note payload `N` is opaque: `meters` passes it through from `RawNote` to `Event` and never inspects it. Do not add pitch, frequency, volume, instrument or other note semantics to `meters`, and do not depend on a pitch library such as `pitches`; those belong in `N` and in the consumer.
   - Functions that allocate return memory the caller owns (e.g. `Phrase.toEvents`); document that in the doc comment.
 
 ______________________________________________________________________

@@ -5,7 +5,7 @@ pub fn build(b: *std.Build) void {
     const optimize = b.standardOptimizeOption(.{});
 
     // Library module declaration (Pure Zig, std only)
-    const mod = b.addModule("phrases", .{
+    const mod = b.addModule("meters", .{
         .root_source_file = b.path("src/root.zig"),
         .target = target,
         .optimize = optimize,
@@ -14,7 +14,7 @@ pub fn build(b: *std.Build) void {
     // Library installation
     const lib = b.addLibrary(.{
         .linkage = .static,
-        .name = "phrases",
+        .name = "meters",
         .root_module = mod,
     });
     b.installArtifact(lib);

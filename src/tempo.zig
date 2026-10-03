@@ -1,6 +1,6 @@
 //! Tempo conversions between beats and sample frames.
 //!
-//! Every conversion in `phrases` goes through `samplesPerBeat` and `framesFromBeats`, so positions
+//! Every conversion in `meters` goes through `samplesPerBeat` and `framesFromBeats`, so positions
 //! and lengths share one beat length and one rounding.
 
 const std = @import("std");

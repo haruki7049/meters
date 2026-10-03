@@ -1,7 +1,7 @@
 //! Minimal score structure: positions, time signatures, tempo conversion, and declarative
 //! phrases placed in time as events.
 //!
-//! Pure Zig (std only). `phrases` handles only time and placement: what a note is and how it
+//! Pure Zig (std only). `meters` handles only time and placement: what a note is and how it
 //! sounds are left to the consumer, through the payload type of `Phrase(N)` and `Event(N)`.
 
 const std = @import("std");

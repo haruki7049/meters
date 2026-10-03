@@ -1,10 +1,10 @@
-# phrases
+# meters
 
 Minimal score structure library in Zig
 
 Pure Zig with no dependencies beyond `std`. Requires Zig `0.16.0`.
 
-`phrases` handles time and placement only: bars, beats, time signatures, tempo, and phrases of notes placed in time.
+`meters` handles time and placement only: bars, beats, time signatures, tempo, and phrases of notes placed in time.
 It does not know what a note is. The payload type `N` of `Phrase(N)` and `Event(N)` carries whatever a note means to
 the consumer (a pitch, a drum voice, a velocity, an instrument string, ...), and resolving it, for example to a
 frequency, is the consumer's job.
@@ -31,22 +31,22 @@ that is NaN, negative or infinite or an offset beyond a `usize`, and `error.Inva
 ## Usage
 
 ```sh
-zig fetch --save git+https://github.com/haruki7049/phrases
+zig fetch --save git+https://github.com/haruki7049/meters
 ```
 
 ```zig
 // build.zig
-const phrases = b.dependency("phrases", .{ .target = target, .optimize = optimize });
-mod.addImport("phrases", phrases.module("phrases"));
+const meters = b.dependency("meters", .{ .target = target, .optimize = optimize });
+mod.addImport("meters", meters.module("meters"));
 ```
 
 ```zig
 const std = @import("std");
-const phrases = @import("phrases");
+const meters = @import("meters");
 
 // Any payload type works; a pitch type from another library, such as `pitches`, is typical.
 const Note = struct { name: []const u8, volume: f64 = 1.0 };
-const Phrase = phrases.Phrase(Note);
+const Phrase = meters.Phrase(Note);
 
 // A phrase can also be loaded at comptime from a ZON file: `const p: Phrase = @import("phrase.zon");`
 const melody: Phrase = .{

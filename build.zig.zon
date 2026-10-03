@@ -1,7 +1,7 @@
 .{
-    .name = .phrases,
+    .name = .meters,
     .version = "0.1.0",
-    .fingerprint = 0x121ac8c65197cb9b, // Changing this has security and trust implications.
+    .fingerprint = 0x2a3e40e89b4bc512, // Changing this has security and trust implications.
     .minimum_zig_version = "0.16.0",
 
     .dependencies = .{},
