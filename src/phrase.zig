@@ -8,7 +8,7 @@ const tempo = @import("./tempo.zig");
 
 /// Returns a Phrase type whose notes carry a payload of type N.
 ///
-/// `phrases` only places notes in time. It does not interpret N: a pitch, a drum voice, a
+/// `meters` only places notes in time. It does not interpret N: a pitch, a drum voice, a
 /// velocity or an instrument string all belong to N, and resolving N (for example to a frequency)
 /// is left to the consumer.
 pub fn inner(comptime N: type) type {
@@ -91,7 +91,7 @@ pub fn inner(comptime N: type) type {
     };
 }
 
-/// A pitch-like payload for the tests; `phrases` itself knows no pitch type.
+/// A pitch-like payload for the tests; `meters` itself knows no pitch type.
 const TestPitch = struct {
     code: enum { c, e, g, a },
     octave: i8,

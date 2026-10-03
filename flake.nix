@@ -15,7 +15,7 @@
     inputs:
     let
       # The only repository-specific line: the package name.
-      name = "phrases";
+      name = "meters";
     in
     inputs.flake-parts.lib.mkFlake { inherit inputs; } {
       systems = [
