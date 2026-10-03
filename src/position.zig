@@ -2,43 +2,35 @@
 
 const std = @import("std");
 const TimeSignature = @import("./time-signature.zig");
+const tempo = @import("./tempo.zig");
 
 const Self = @This();
 
 /// 0-indexed measure/bar number.
 bar: usize = 0,
-/// Beat offset within the bar.
+/// Beat offset within the bar; must be finite and not negative.
 beat: f64 = 0.0,
+
+/// Errors `toSampleOffset` returns.
+pub const ToSampleOffsetError = error{
+    /// `beat` is NaN, negative or infinite, or the offset does not fit in a `usize`.
+    InvalidPosition,
+} || tempo.Error;
 
 /// Calculate the sample frame offset given BPM, Time Signature, and sample rate.
 /// BPM is defined relative to quarter notes (denominator = 4).
 /// The offset is rounded to the nearest frame.
-pub fn toSampleOffset(self: Self, bpm: usize, time_sig: TimeSignature, sample_rate: u32) !usize {
-    if (std.math.isNan(self.beat) or self.beat < 0.0) {
-        return error.InvalidPosition;
-    }
-    if (bpm == 0) {
-        return error.InvalidBpm;
-    }
-    if (time_sig.denominator == 0 or time_sig.numerator == 0) {
-        return error.InvalidTimeSignature;
-    }
+pub fn toSampleOffset(self: Self, bpm: usize, time_sig: TimeSignature, sample_rate: u32) ToSampleOffsetError!usize {
+    // Written as a negation so that NaN is rejected too; infinity is caught below.
+    if (!(self.beat >= 0.0)) return error.InvalidPosition;
 
-    const bpm_f: f64 = @floatFromInt(bpm);
-    const sample_rate_f: f64 = @floatFromInt(sample_rate);
+    const spb = try tempo.samplesPerBeat(bpm, time_sig, sample_rate);
     const num_f: f64 = @floatFromInt(time_sig.numerator);
-    const den_f: f64 = @floatFromInt(time_sig.denominator);
-
-    // Standard BPM is based on quarter notes (denominator = 4)
-    const samples_per_quarter: f64 = (60.0 / bpm_f) * sample_rate_f;
-    // Scale sample duration per beat according to denominator (e.g. 8th note beat = 4/8 of quarter)
-    const spb: f64 = samples_per_quarter * (4.0 / den_f);
-
     const total_beats: f64 = (@as(f64, @floatFromInt(self.bar)) * num_f) + self.beat;
 
     // Round instead of truncating: a product that lands just below an integer (e.g. 44099.99...)
     // would otherwise lose a frame.
-    return @intFromFloat(@round(total_beats * spb));
+    return tempo.framesFromBeats(total_beats, spb) orelse error.InvalidPosition;
 }
 
 test "Position toSampleOffset 4/4 meter" {
@@ -121,6 +113,29 @@ test "Position toSampleOffset invalid position NaN or negative" {
 
     const pos_neg = Self{ .bar = 0, .beat = -1.0 };
     try std.testing.expectError(error.InvalidPosition, pos_neg.toSampleOffset(60, .{}, 44100));
+}
+
+test "Position toSampleOffset rejects infinite beats and offsets beyond a usize" {
+    try std.testing.expectError(error.InvalidPosition, (Self{ .beat = std.math.inf(f64) }).toSampleOffset(120, .{}, 44100));
+    try std.testing.expectError(error.InvalidPosition, (Self{ .beat = -std.math.inf(f64) }).toSampleOffset(120, .{}, 44100));
+    // maxInt(usize) bars of 4 beats at 22050 frames each is far beyond a usize.
+    try std.testing.expectError(error.InvalidPosition, (Self{ .bar = std.math.maxInt(usize) }).toSampleOffset(120, .{}, 44100));
+    // A finite beat whose offset overflows: 1e300 beats.
+    try std.testing.expectError(error.InvalidPosition, (Self{ .beat = 1e300 }).toSampleOffset(120, .{}, 44100));
+}
+
+test "Position toSampleOffset invalid sample rate" {
+    try std.testing.expectError(error.InvalidSampleRate, (Self{ .bar = 1 }).toSampleOffset(120, .{}, 0));
+}
+
+test "Position toSampleOffset 3/4, 2/2 and 12/8 meters" {
+    // 120 BPM, 44100 Hz: a quarter is 22050 frames.
+    // 3/4: bar 2 = 2 * 3 quarters = 6 * 22050 = 132300
+    try std.testing.expectEqual(@as(usize, 132300), try (Self{ .bar = 2 }).toSampleOffset(120, .{ .numerator = 3, .denominator = 4 }, 44100));
+    // 2/2: bar 1, beat 1 = 3 halves = 3 * 44100 = 132300
+    try std.testing.expectEqual(@as(usize, 132300), try (Self{ .bar = 1, .beat = 1.0 }).toSampleOffset(120, .{ .numerator = 2, .denominator = 2 }, 44100));
+    // 12/8: bar 1 = 12 eighths = 12 * 11025 = 132300
+    try std.testing.expectEqual(@as(usize, 132300), try (Self{ .bar = 1 }).toSampleOffset(120, .{ .numerator = 12, .denominator = 8 }, 44100));
 }
 
 test {
