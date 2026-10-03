@@ -10,8 +10,9 @@ const Position = @import("./position.zig");
 pub fn inner(comptime N: type) type {
     return struct {
         /// When the event starts.
-        position: Position = .{},
-        /// How long the event lasts, in sample frames.
+        position: Position,
+        /// How long the event lasts, in sample frames: the offset of its end minus the offset of its
+        /// start, so an event that ends where the next one starts tiles with it exactly.
         length: usize,
         /// The note payload, passed through unchanged.
         note: N,
