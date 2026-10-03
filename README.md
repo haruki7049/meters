@@ -20,7 +20,9 @@ frequency, is the consumer's job.
 | `tempo` | `samplesPerBeat` (a beat of a time signature, in frames) and `framesFromBeats` (rounded once, to the nearest frame) |
 
 Positions and lengths share one beat: a beat of the time signature passed to `toEvents` and `toSampleOffset`, so in
-6/8 one beat is an 8th note. Invalid input returns an error instead of a wrong value or a panic: `error.InvalidBpm`,
+6/8 one beat is an 8th note. A beat at or past the numerator carries into the following bars (in 4/4, bar 0 beat 5 is
+bar 1 beat 1), so computed beat offsets can be used as they are. An event's length is the offset of its end minus the
+offset of its start, so back-to-back notes tile with no frame of gap or overlap. Invalid input returns an error instead of a wrong value or a panic: `error.InvalidBpm`,
 `error.InvalidTimeSignature` or `error.InvalidSampleRate` for a zero parameter, `error.InvalidPosition` for a beat
 that is NaN, negative or infinite or an offset beyond a `usize`, and `error.InvalidDuration` for such a
 `duration_beats`. The error sets are public (`tempo.Error`, `Position.ToSampleOffsetError`,
