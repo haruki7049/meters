@@ -17,13 +17,14 @@ ______________________________________________________________________
   - `root.zig`: Re-exports every public symbol.
   - `position.zig`: `Position` (0-indexed `bar`, `beat` offset) and `toSampleOffset`.
   - `time-signature.zig`: `TimeSignature` (`numerator` / `denominator`, defaults to 4/4).
-  - `tempo.zig`: Samples-per-beat conversions (`samplesPerBeat`, `spb`).
+  - `tempo.zig`: `samplesPerBeat` (a beat of a time signature) and `framesFromBeats`, the only beat-to-frame conversion, with `tempo.Error`.
   - `event.zig`: `Event(N)`, a time-placed event with `position`, `length` (sample frames) and a `note: N` payload.
   - `phrase.zig`: `Phrase(N)`, a declarative phrase of raw notes placed in time by `toEvents`.
 - **Domain Conventions**:
   - BPM always counts quarter notes; `TimeSignature.denominator` scales the beat length (an 8th-note beat is half a quarter).
   - Bars are 0-indexed. `beat` is an `f64` offset within the bar.
   - Timing conversions compute in `f64` and convert to an integer frame once, at the end, with `@round`. Do not truncate, and do not round an intermediate value such as samples per beat before multiplying it.
+  - Positions and lengths use one beat, the beat of the time signature: every beat-to-frame conversion goes through `tempo.samplesPerBeat` and `tempo.framesFromBeats`. Do not compute a beat length or a frame count anywhere else, and do not change the order of operations in `samplesPerBeat`, which decides how offsets round.
   - The note payload `N` is opaque: `phrases` passes it through from `RawNote` to `Event` and never inspects it. Do not add pitch, frequency, volume, instrument or other note semantics to `phrases`, and do not depend on a pitch library such as `pitches`; those belong in `N` and in the consumer.
   - Functions that allocate return memory the caller owns (e.g. `Phrase.toEvents`); document that in the doc comment.
 
@@ -68,10 +69,10 @@ ______________________________________________________________________
   - `camelCase` for functions and methods (`toSampleOffset`, `toEvents`).
   - `snake_case` for variables, parameters, struct fields and enum tags (`sample_rate`, `duration_beats`, `.cs`).
   - Comptime type parameters are always a single uppercase character (`N` for the note payload type). Multi-character names such as `comptime SampleType: type` are prohibited.
-  - Error tags are `PascalCase` (`error.InvalidPosition`, `error.InvalidBpm`, `error.InvalidDuration`).
+  - Error tags are `PascalCase` (`error.InvalidPosition`, `error.InvalidBpm`, `error.InvalidSampleRate`).
 - **Generic Factories**: A type parameterized by comptime types is defined as `pub fn inner(...) type` in its own file and re-exported under its `PascalCase` name in `root.zig` (`pub const Event = @import("./event.zig").inner;`).
 - **Tests**: Keep tests next to the code they cover, in the same file. Every file ends with `test { std.testing.refAllDecls(@This()); }`. A test that checks a numeric result states the expected value and how it was derived in a comment (e.g. `// 60 BPM, 44100 Hz => spb = 44100`).
-- **Validation**: Reject invalid input with an error instead of reaching undefined or panicking behavior (e.g. `toSampleOffset` returns `error.InvalidPosition`, `error.InvalidBpm` and `error.InvalidTimeSignature`).
+- **Validation**: Reject invalid input with an error instead of reaching undefined or panicking behavior: zero parameters, NaN, negative or infinite beats, and frame counts beyond a `usize`. Name each error after the input that is wrong (`InvalidBpm`, `InvalidTimeSignature`, `InvalidSampleRate`, `InvalidPosition`, `InvalidDuration`), and declare the error set of every public function that can fail (`tempo.Error`, `Position.ToSampleOffsetError`, `Phrase(N).ToEventsError`) instead of leaving it inferred.
 
 ______________________________________________________________________
 

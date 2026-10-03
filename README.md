@@ -17,10 +17,14 @@ frequency, is the consumer's job.
 | `Event(N)` | Time-placed event: `position`, `length` (sample frames), `note: N` |
 | `Position` | Bar and beat offset, with `toSampleOffset` |
 | `TimeSignature` | `numerator` / `denominator` (defaults to 4/4) |
-| `tempo.spb` | Samples per beat for a given BPM and sample rate |
+| `tempo` | `samplesPerBeat` (a beat of a time signature, in frames) and `framesFromBeats` (rounded once, to the nearest frame) |
 
-`toEvents` returns `error.InvalidBpm` for a zero BPM and `error.InvalidDuration` for a `duration_beats` that is NaN,
-negative or infinite.
+Positions and lengths share one beat: a beat of the time signature passed to `toEvents` and `toSampleOffset`, so in
+6/8 one beat is an 8th note. Invalid input returns an error instead of a wrong value or a panic: `error.InvalidBpm`,
+`error.InvalidTimeSignature` or `error.InvalidSampleRate` for a zero parameter, `error.InvalidPosition` for a beat
+that is NaN, negative or infinite or an offset beyond a `usize`, and `error.InvalidDuration` for such a
+`duration_beats`. The error sets are public (`tempo.Error`, `Position.ToSampleOffsetError`,
+`Phrase(N).ToEventsError`).
 
 ## Usage
 
@@ -53,8 +57,8 @@ const melody: Phrase = .{
 
 pub fn main() !void {
     const allocator = std.heap.page_allocator;
-    // 120 BPM, 44100 Hz
-    const events = try melody.toEvents(allocator, 120, 44100);
+    // 120 BPM, 4/4, 44100 Hz
+    const events = try melody.toEvents(allocator, 120, .{}, 44100);
     defer allocator.free(events);
     // events[1]: position bar 0 beat 1.0, length 11025 frames, note .{ .name = "G4", .volume = 0.8 }
 }
