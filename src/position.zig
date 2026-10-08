@@ -19,9 +19,13 @@ pub const ToSampleOffsetError = error{
     InvalidPosition,
 } || tempo.Error;
 
-/// Calculate the sample frame offset given BPM, Time Signature, and sample rate.
-/// BPM is defined relative to quarter notes (denominator = 4).
-/// The offset is rounded to the nearest frame.
+/// Returns the offset of this position in sample frames, counted from bar 0 beat 0.
+///
+/// `bar` and `beat` count beats of `time_signature` (in 6/8, an 8th note), while `bpm` always
+/// counts quarter notes, whatever the denominator; see `tempo.samplesPerBeat`. The offset is
+/// rounded to the nearest frame. Returns `error.InvalidPosition` for a beat that is NaN, negative
+/// or infinite or an offset beyond a `usize`, and a `tempo.Error` for an invalid `bpm`,
+/// `time_signature` or `sample_rate`.
 pub fn toSampleOffset(self: Self, bpm: usize, time_signature: TimeSignature, sample_rate: u32) ToSampleOffsetError!usize {
     // Written as a negation so that NaN is rejected too; infinity is caught below.
     if (!(self.beat >= 0.0)) return error.InvalidPosition;
