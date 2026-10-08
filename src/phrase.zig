@@ -17,7 +17,7 @@ pub fn inner(comptime N: type) type {
 
         /// Raw note definition stored in phrase declarations (e.g. `phrase.zon`).
         pub const RawNote = struct {
-            /// 0-indexed bar the note starts in.
+            /// 0-indexed bar that `beat` counts from.
             bar: usize = 0,
             /// Beat offset from the start of `bar`; must be finite and not negative. A beat at or past
             /// the numerator carries into the following bars, as in `Position.beat`.
@@ -30,11 +30,15 @@ pub fn inner(comptime N: type) type {
 
         /// Errors `toEvents` returns.
         pub const ToEventsError = error{
-            /// A `duration_beats` is NaN, negative, infinite, or longer than a `usize` counts in frames.
+            /// A `duration_beats` is NaN, negative or infinite, or makes the note end at an offset
+            /// beyond a `usize`.
             InvalidDuration,
         } || Position.ToSampleOffsetError || std.mem.Allocator.Error;
 
+        /// A label for the phrase; `meters` does not use it.
         name: []const u8,
+        /// The notes of the phrase. They need not be sorted and may overlap; `toEvents` returns
+        /// one event per note, in the same order.
         notes: []const RawNote,
 
         /// Places every note in time: its position, and its length in sample frames. Each note

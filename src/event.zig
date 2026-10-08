@@ -9,7 +9,9 @@ const Position = @import("./position.zig");
 /// it sounds are left to the consumer.
 pub fn inner(comptime N: type) type {
     return struct {
-        /// When the event starts.
+        /// When the event starts, in bars and beats rather than frames. `Position.toSampleOffset`,
+        /// with the `bpm`, `time_signature` and `sample_rate` the event was placed with, gives
+        /// the frame it starts on.
         position: Position,
         /// How long the event lasts, in sample frames: the offset of its end minus the offset of its
         /// start, so an event that ends where the next one starts tiles with it exactly.
