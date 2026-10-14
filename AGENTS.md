@@ -20,7 +20,6 @@ ______________________________________________________________________
   - `tempo.zig`: `samplesPerBeat` (a beat of a time signature) and `framesFromBeats`, the only beat-to-frame conversion, with `tempo.Error`.
   - `context.zig`: `Context`, what a primitive resolves itself with: `bpm`, `time_signature`, `sample_rate` and the `origin` of the element.
   - `span.zig`: `Span`, the time primitive (`bar`, `beat`, `beats`), resolved to a start frame and a length in frames.
-  - `opaque.zig`: `Opaque(N)`, the marker that declares a column of a layer as an opaque payload of type `N`.
   - `layer.zig`: `Layer(spec)`, a layer of named columns placed in time, with `notate`, `zip`, `concat`, `join`, `repeat`, `map` and `resolve`, and `ZipError`.
 - **Domain Conventions**:
   - BPM always counts quarter notes; `TimeSignature.denominator` scales the beat length (an 8th-note beat is half a quarter).
@@ -28,8 +27,10 @@ ______________________________________________________________________
   - A note's length is the offset of its end minus the offset of its start (`Span.resolve` rounds `bar_start + (beat + beats)` and `bar_start + beat` and subtracts), never a length rounded on its own, so back-to-back notes tile with no frame of gap or overlap.
   - Timing conversions compute in `f64` and convert to an integer frame once, at the end, with `@round`. Do not truncate, and do not round an intermediate value such as samples per beat before multiplying it.
   - Positions and lengths use one beat, the beat of the time signature: every beat-to-frame conversion goes through `tempo.samplesPerBeat` and `tempo.framesFromBeats`. Do not compute a beat length or a frame count anywhere else, and do not change the order of operations in `samplesPerBeat`, which decides how offsets round.
-  - `Layer` never reads the data of a column: primitives resolve themselves, and a payload `N` declared with `Opaque(N)` is passed through unchanged. A column is a payload only when it is declared with `Opaque`; every other column must keep the primitive contract (`ResolveT` and `resolve(self, ctx: Context)`), or the layer type does not compile. Do not infer a payload from a missing `resolve`.
-  - The note payload `N` is opaque: `meters` never inspects it. Do not add pitch, frequency, volume, instrument or other note semantics to `meters`, and do not depend on a pitch library such as `pitches`; those belong in `N` and in the consumer.
+  - `Layer` never reads the data of a column: every column is a primitive (`ResolveT` and `resolve(self, ctx: Context)`), written by the consumer or provided as `Span`, and resolves itself, or the layer type does not compile. Do not add a marker or any other way to pass a column through unresolved.
+  - A note primitive is written by the consumer: `meters` never inspects it. Do not add pitch, frequency, volume, instrument or other note semantics to `meters`, and do not depend on a pitch library such as `pitches`; those belong in the consumer's primitives.
+  - One score per vibrating body: a score is written for one vibrating body, and which body sounds is decided by which score the user hands to it. `meters` does not enforce this; do not add checks or safeguards for it.
+  - `Span` resolves `length` to the note value in frames and hands it over as it is; whether it is the sounding length is up to the instrument the user implements.
   - Functions that allocate return memory the caller owns (e.g. `Layer.resolve`, `Layer.join`); document that in the doc comment.
 
 ______________________________________________________________________
@@ -72,7 +73,7 @@ ______________________________________________________________________
   - `PascalCase` for types and for files imported as a struct (`Position`, `TimeSignature`).
   - `camelCase` for functions and methods (`toSampleOffset`, `notate`, `resolve`).
   - `snake_case` for variables, parameters, struct fields and enum tags (`sample_rate`, `duration_beats`, `.cs`).
-  - Comptime type parameters are always a single uppercase character (`N` for the note payload type). Multi-character names such as `comptime SampleType: type` are prohibited.
+  - Comptime type parameters are always a single uppercase character (`N` for a note type). Multi-character names such as `comptime SampleType: type` are prohibited.
   - Error tags are `PascalCase` (`error.InvalidPosition`, `error.InvalidBpm`, `error.InvalidSampleRate`).
 - **Generic Factories**: A type parameterized by comptime types is defined as `pub fn inner(...) type` in its own file and re-exported under its `PascalCase` name in `root.zig` (`pub const Layer = @import("./layer.zig").inner;`).
 - **Tests**: Keep tests next to the code they cover, in the same file (a ZON fixture such as `src/test-layer.zon` sits next to the test that imports it). Every file ends with `test { std.testing.refAllDecls(@This()); }`. A test that checks a numeric result states the expected value and how it was derived in a comment (e.g. `// 60 BPM, 44100 Hz => spb = 44100`).

@@ -6,9 +6,23 @@ Pure Zig with no dependencies beyond `std`. Requires Zig `0.16.0`.
 
 `meters` handles time and placement only: bars, beats, time signatures, tempo, and layers of score information placed
 in time. It does not know what a note is. A score is a `Layer` of named columns: `Span` says when each note starts and
-how long it lasts, and whatever a note means to the consumer (a pitch, a drum voice, a velocity, an instrument string,
-...) is a column of its own, either a primitive the consumer writes or a payload declared with `Opaque(N)`, which
-`meters` passes through without reading.
+its note value, and how the note is struck (a pitch, how strong, open or closed, ...) is a column of its own. Every
+column is a primitive: a type with `ResolveT` and `resolve(self, ctx: meters.Context)` that the consumer writes and
+that resolves itself, without `meters` reading it.
+
+## One score per vibrating body
+
+A score is written for one vibrating body: one drum, one cymbal, one string. Which body sounds is not written in the
+score, note by note; it is decided by which score the user hands to which body. To write a drum kit, write one score
+for the kick, one for the snare, one for the hi-hat, and so on.
+
+- **What goes in a score**: when each note is struck, its note value, and how it is struck, written per note as
+  primitives (open or closed, high or low, how strong).
+- **What does not**: which body or instrument a note belongs to. A column that picks the body note by note mixes
+  several bodies in one score; split it into one score per body instead. Separate scores can be reused on their own.
+
+`meters` does not enforce this: nothing checks a column, and a layer that mixes bodies still compiles. It is a rule
+for writing scores, kept by the user.
 
 ## Where it fits
 
@@ -17,13 +31,13 @@ how long it lasts, and whatever a note means to the consumer (a pitch, a drum vo
 ```text
 meters      bars, beats, tempo and layers, placed in sample frames
   │
-  ├────────▶ resonator   which lane a note goes to: instrument strings, canon voices
+  ├────────▶ resonator   structures built on meters positions
   │             │
   ▼             ▼
 sequencer   schedules lightmix waves on tracks, micro-fades overlaps, renders audio
 ```
 
-- [`resonator`](https://github.com/haruki7049/resonator): voice-routing structures, built on `meters.Position`.
+- [`resonator`](https://github.com/haruki7049/resonator): structures built on `meters.Position`.
 - [`sequencer`](https://github.com/haruki7049/sequencer): places [`lightmix`](https://github.com/haruki7049/lightmix)
   waves at `meters` positions and renders them into a wave or a stream of blocks.
 - [`pulse`](https://github.com/haruki7049/pulse): a drum solo built on all of the above.
@@ -34,7 +48,6 @@ sequencer   schedules lightmix waves on tracks, micro-fades overlaps, renders au
 | :--- | :--- |
 | `Layer(spec)` | A layer of named columns placed in time: `notate`, `zip`, `concat`, `join`, `repeat`, `map`, `resolve` |
 | `Span` | The time primitive: `bar`, `beat` and `beats`, resolved to a `start` frame and a `length` in frames |
-| `Opaque(N)` | Marks a column of a layer as a payload of type `N`, passed through unresolved |
 | `Context` | What a primitive resolves itself with: `bpm`, `time_signature`, `sample_rate`, and the element's `origin` |
 | `ZipError` | Errors of `zip`, besides the allocator's |
 | `Position` | Bar and beat offset, with `toSampleOffset` |
@@ -53,6 +66,10 @@ sequencer   schedules lightmix waves on tracks, micro-fades overlaps, renders au
   ends on the beat where the next one starts leaves no frame of gap or overlap, also across concatenated segments. On a
   binary grid (halves, quarters, 16ths, ...) this always holds; on a grid such as triplets, `beat + beats` can differ
   from the next beat in the last bit of an `f64` and, rarely, leave one frame.
+- **A length is a note value, not a sounding length**: the `length` a `Span` resolves to is its note value in frames,
+  computed from `beats`. `meters` hands it over as resolved and does not decide how long a note actually sounds:
+  whether the length is used as the sounding length or ignored (a drum hit that rings out, for example) is up to the
+  instrument the user implements.
 - **Errors, not panics**: invalid input returns an error instead of a wrong value or a panic: `error.InvalidBpm`,
   `error.InvalidTimeSignature` or `error.InvalidSampleRate` for a zero parameter, `error.InvalidPosition` for a beat
   that is NaN, negative or infinite or an offset beyond a `usize`, and `error.InvalidDuration` for such a length in
@@ -73,10 +90,9 @@ mod.addImport("meters", meters.module("meters"));
 
 ### Layers
 
-A layer type is made of named columns. Each column is a primitive, a type with `ResolveT` and
-`resolve(self, ctx: meters.Context)` such as `meters.Span`, or a payload declared with `meters.Opaque(N)`. The order
-the columns are written in does not matter, and a column that is neither does not compile: a payload is never guessed
-from a missing `resolve`.
+A layer type is made of named columns. Every column is a primitive, a type with `ResolveT` and
+`resolve(self, ctx: meters.Context)`, such as `meters.Span` or a note the user writes. The order the columns are
+written in does not matter, and a column without `ResolveT` and `resolve` does not compile.
 
 A score is built from small layers:
 
@@ -87,19 +103,29 @@ A score is built from small layers:
   before it ends.
 - `map` transforms one column with a `transform.apply`, such as transposing the notes.
 
-`resolve` turns every element into one value per column, under the same names: a `Span` gives its `start` and
-`length` in frames, and a payload is passed through unchanged. The caller owns the returned slice; the other
+`resolve` turns every element into one value per column, under the same names: each primitive gives its `ResolveT`,
+and a `Span` gives its `start` and `length` in frames. The caller owns the returned slice; the other
 operations allocate too and never free their inputs, so a score is meant to be built with an arena.
 
 ```zig
 const std = @import("std");
 const meters = @import("meters");
 
-// Any payload type works; a pitch type from another library, such as `pitches`, is typical.
-const Note = struct { name: []const u8, volume: f64 = 1.0 };
+// How a note is struck, written as a primitive: here it resolves to itself.
+const Note = struct {
+    name: []const u8,
+    volume: f64 = 1.0,
+
+    pub const ResolveT = Note;
+
+    pub fn resolve(self: Note, ctx: meters.Context) ResolveT {
+        _ = ctx;
+        return self;
+    }
+};
 
 const Rhythm = meters.Layer(.{ .span = meters.Span });
-const Notes = meters.Layer(.{ .note = meters.Opaque(Note) });
+const Notes = meters.Layer(.{ .note = Note });
 
 // One beat: an eighth and two sixteenths.
 const gallop: Rhythm = .{
@@ -153,7 +179,7 @@ A layer can be written as a ZON file and loaded at comptime, which keeps the sco
 ```
 
 ```zig
-const Melody = meters.Layer(.{ .span = meters.Span, .note = meters.Opaque(Note) });
+const Melody = meters.Layer(.{ .span = meters.Span, .note = Note });
 const melody: Melody = @import("melody.zon");
 ```
 

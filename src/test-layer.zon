@@ -4,7 +4,7 @@
         .note = .{
             .{ .semitones = 0 },
             .{ .semitones = 4 },
-            // A negative payload value
+            // A negative value
             .{ .semitones = -12 },
         },
         .span = .{
