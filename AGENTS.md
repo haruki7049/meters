@@ -18,16 +18,19 @@ ______________________________________________________________________
   - `position.zig`: `Position` (0-indexed `bar`, `beat` offset) and `toSampleOffset`.
   - `time-signature.zig`: `TimeSignature` (`numerator` / `denominator`, defaults to 4/4).
   - `tempo.zig`: `samplesPerBeat` (a beat of a time signature) and `framesFromBeats`, the only beat-to-frame conversion, with `tempo.Error`.
-  - `event.zig`: `Event(N)`, a time-placed event with `position`, `length` (sample frames) and a `note: N` payload.
-  - `phrase.zig`: `Phrase(N)`, a declarative phrase of raw notes placed in time by `toEvents`.
+  - `context.zig`: `Context`, what a primitive resolves itself with: `bpm`, `time_signature`, `sample_rate` and the `origin` of the element.
+  - `span.zig`: `Span`, the time primitive (`bar`, `beat`, `beats`), resolved to a start frame and a length in frames.
+  - `opaque.zig`: `Opaque(N)`, the marker that declares a column of a layer as an opaque payload of type `N`.
+  - `layer.zig`: `Layer(spec)`, a layer of named columns placed in time, with `notate`, `zip`, `concat`, `join`, `repeat`, `map` and `resolve`, and `ZipError`.
 - **Domain Conventions**:
   - BPM always counts quarter notes; `TimeSignature.denominator` scales the beat length (an 8th-note beat is half a quarter).
   - Bars are 0-indexed. `beat` is an `f64` offset from the start of the bar. A beat at or past the numerator is valid and carries into the following bars (in 4/4, bar 0 beat 5 is bar 1 beat 1), so computed beat offsets can be used as they are; do not reject or wrap them.
-  - An event length is the offset of its end minus the offset of its start (`toSampleOffset(beat + duration_beats) - toSampleOffset(beat)`), never a duration rounded on its own, so back-to-back notes tile with no frame of gap or overlap.
+  - A note's length is the offset of its end minus the offset of its start (`Span.resolve` rounds `bar_start + (beat + beats)` and `bar_start + beat` and subtracts), never a length rounded on its own, so back-to-back notes tile with no frame of gap or overlap.
   - Timing conversions compute in `f64` and convert to an integer frame once, at the end, with `@round`. Do not truncate, and do not round an intermediate value such as samples per beat before multiplying it.
   - Positions and lengths use one beat, the beat of the time signature: every beat-to-frame conversion goes through `tempo.samplesPerBeat` and `tempo.framesFromBeats`. Do not compute a beat length or a frame count anywhere else, and do not change the order of operations in `samplesPerBeat`, which decides how offsets round.
-  - The note payload `N` is opaque: `meters` passes it through from `RawNote` to `Event` and never inspects it. Do not add pitch, frequency, volume, instrument or other note semantics to `meters`, and do not depend on a pitch library such as `pitches`; those belong in `N` and in the consumer.
-  - Functions that allocate return memory the caller owns (e.g. `Phrase.toEvents`); document that in the doc comment.
+  - `Layer` never reads the data of a column: primitives resolve themselves, and a payload `N` declared with `Opaque(N)` is passed through unchanged. A column is a payload only when it is declared with `Opaque`; every other column must keep the primitive contract (`ResolveT` and `resolve(self, ctx: Context)`), or the layer type does not compile. Do not infer a payload from a missing `resolve`.
+  - The note payload `N` is opaque: `meters` never inspects it. Do not add pitch, frequency, volume, instrument or other note semantics to `meters`, and do not depend on a pitch library such as `pitches`; those belong in `N` and in the consumer.
+  - Functions that allocate return memory the caller owns (e.g. `Layer.resolve`, `Layer.join`); document that in the doc comment.
 
 ______________________________________________________________________
 
@@ -67,13 +70,13 @@ ______________________________________________________________________
 - **Comments**: Every public declaration has a `///` doc comment, and every file starts with a `//!` comment that says what it contains. Comments are in English.
 - **Naming**:
   - `PascalCase` for types and for files imported as a struct (`Position`, `TimeSignature`).
-  - `camelCase` for functions and methods (`toSampleOffset`, `toEvents`).
+  - `camelCase` for functions and methods (`toSampleOffset`, `notate`, `resolve`).
   - `snake_case` for variables, parameters, struct fields and enum tags (`sample_rate`, `duration_beats`, `.cs`).
   - Comptime type parameters are always a single uppercase character (`N` for the note payload type). Multi-character names such as `comptime SampleType: type` are prohibited.
   - Error tags are `PascalCase` (`error.InvalidPosition`, `error.InvalidBpm`, `error.InvalidSampleRate`).
-- **Generic Factories**: A type parameterized by comptime types is defined as `pub fn inner(...) type` in its own file and re-exported under its `PascalCase` name in `root.zig` (`pub const Event = @import("./event.zig").inner;`).
-- **Tests**: Keep tests next to the code they cover, in the same file (a ZON fixture such as `src/test-phrase.zon` sits next to the test that imports it). Every file ends with `test { std.testing.refAllDecls(@This()); }`. A test that checks a numeric result states the expected value and how it was derived in a comment (e.g. `// 60 BPM, 44100 Hz => spb = 44100`).
-- **Validation**: Reject invalid input with an error instead of reaching undefined or panicking behavior: zero parameters, NaN, negative or infinite beats, and frame counts beyond a `usize`. Name each error after the input that is wrong (`InvalidBpm`, `InvalidTimeSignature`, `InvalidSampleRate`, `InvalidPosition`, `InvalidDuration`), and declare the error set of every public function that can fail (`tempo.Error`, `Position.ToSampleOffsetError`, `Phrase(N).ToEventsError`) instead of leaving it inferred.
+- **Generic Factories**: A type parameterized by comptime types is defined as `pub fn inner(...) type` in its own file and re-exported under its `PascalCase` name in `root.zig` (`pub const Layer = @import("./layer.zig").inner;`).
+- **Tests**: Keep tests next to the code they cover, in the same file (a ZON fixture such as `src/test-layer.zon` sits next to the test that imports it). Every file ends with `test { std.testing.refAllDecls(@This()); }`. A test that checks a numeric result states the expected value and how it was derived in a comment (e.g. `// 60 BPM, 44100 Hz => spb = 44100`).
+- **Validation**: Reject invalid input with an error instead of reaching undefined or panicking behavior: zero parameters, NaN, negative or infinite beats, and frame counts beyond a `usize`. Name each error after the input that is wrong (`InvalidBpm`, `InvalidTimeSignature`, `InvalidSampleRate`, `InvalidPosition`, `InvalidDuration`), and declare the error set of every public function that can fail (`tempo.Error`, `Position.ToSampleOffsetError`, `Span.ResolveError`, `Layer(spec).ResolveError`, `Layer(spec).MapError(T)`) instead of leaving it inferred.
 
 ______________________________________________________________________
 

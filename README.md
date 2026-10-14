@@ -4,17 +4,18 @@ Minimal score structure library in Zig
 
 Pure Zig with no dependencies beyond `std`. Requires Zig `0.16.0`.
 
-`meters` handles time and placement only: bars, beats, time signatures, tempo, and phrases of notes placed in time.
-It does not know what a note is. The payload type `N` of `Phrase(N)` and `Event(N)` carries whatever a note means to
-the consumer (a pitch, a drum voice, a velocity, an instrument string, ...), and resolving it, for example to a
-frequency, is the consumer's job.
+`meters` handles time and placement only: bars, beats, time signatures, tempo, and layers of score information placed
+in time. It does not know what a note is. A score is a `Layer` of named columns: `Span` says when each note starts and
+how long it lasts, and whatever a note means to the consumer (a pitch, a drum voice, a velocity, an instrument string,
+...) is a column of its own, either a primitive the consumer writes or a payload declared with `Opaque(N)`, which
+`meters` passes through without reading.
 
 ## Where it fits
 
 `meters` produces no sound. It sits at the bottom of a small family of packages, and the audio is made further up:
 
 ```text
-meters      bars, beats, tempo and phrases, placed in sample frames
+meters      bars, beats, tempo and layers, placed in sample frames
   │
   ├────────▶ resonator   which lane a note goes to: instrument strings, canon voices
   │             │
@@ -31,29 +32,32 @@ sequencer   schedules lightmix waves on tracks, micro-fades overlaps, renders au
 
 | Symbol | Description |
 | :--- | :--- |
-| `Phrase(N)` | Declarative phrase of raw notes (`bar`, `beat`, `duration_beats`, `note: N`), with `toEvents` |
-| `Event(N)` | Time-placed event: `position`, `length` (sample frames), `note: N` |
+| `Layer(spec)` | A layer of named columns placed in time: `notate`, `zip`, `concat`, `join`, `repeat`, `map`, `resolve` |
+| `Span` | The time primitive: `bar`, `beat` and `beats`, resolved to a `start` frame and a `length` in frames |
+| `Opaque(N)` | Marks a column of a layer as a payload of type `N`, passed through unresolved |
+| `Context` | What a primitive resolves itself with: `bpm`, `time_signature`, `sample_rate`, and the element's `origin` |
+| `ZipError` | Errors of `zip`, besides the allocator's |
 | `Position` | Bar and beat offset, with `toSampleOffset` |
 | `TimeSignature` | `numerator` / `denominator` (defaults to 4/4) |
 | `tempo` | `samplesPerBeat` (a beat of a time signature, in frames) and `framesFromBeats` (rounded once, to the nearest frame) |
 
 ## Timing rules
 
-- **One beat for everything**: positions and lengths are counted in beats of the time signature passed to `toEvents`
-  and `toSampleOffset`. BPM always counts quarter notes, and the denominator scales the beat, so in 6/8 one beat is
-  an 8th note, half a quarter.
+- **One beat for everything**: positions and lengths are counted in beats of the time signature in the `Context`
+  (and the one passed to `toSampleOffset`). BPM always counts quarter notes, and the denominator scales the beat, so in
+  6/8 one beat is an 8th note, half a quarter.
 - **Beats carry past the bar**: bars are 0-indexed, and a beat at or past the numerator carries into the following
   bars (in 4/4, bar 0 beat 5 is bar 1 beat 1), so computed beat offsets can be used as they are.
 - **Rounded once**: offsets are computed in `f64` and rounded to the nearest frame once, at the end.
-- **Back-to-back notes tile**: an event's length is the offset of its end minus the offset of its start, so a note
-  that ends on the beat where the next one starts leaves no frame of gap or overlap. On a binary grid (halves,
-  quarters, 16ths, ...) this always holds; on a grid such as triplets, `beat + duration_beats` can differ from the
-  next beat in the last bit of an `f64` and, rarely, leave one frame.
+- **Back-to-back notes tile**: a span's length is the offset of its end minus the offset of its start, so a note that
+  ends on the beat where the next one starts leaves no frame of gap or overlap, also across concatenated segments. On a
+  binary grid (halves, quarters, 16ths, ...) this always holds; on a grid such as triplets, `beat + beats` can differ
+  from the next beat in the last bit of an `f64` and, rarely, leave one frame.
 - **Errors, not panics**: invalid input returns an error instead of a wrong value or a panic: `error.InvalidBpm`,
   `error.InvalidTimeSignature` or `error.InvalidSampleRate` for a zero parameter, `error.InvalidPosition` for a beat
-  that is NaN, negative or infinite or an offset beyond a `usize`, and `error.InvalidDuration` for such a
-  `duration_beats`. The error sets are public (`tempo.Error`, `Position.ToSampleOffsetError`,
-  `Phrase(N).ToEventsError`).
+  that is NaN, negative or infinite or an offset beyond a `usize`, and `error.InvalidDuration` for such a length in
+  `beats`. The error sets are public (`tempo.Error`, `Position.ToSampleOffsetError`, `Span.ResolveError`,
+  `Layer(spec).ResolveError`, `Layer(spec).MapError(T)`, `ZipError`).
 
 ## Usage
 
@@ -67,17 +71,25 @@ const meters = b.dependency("meters", .{ .target = target, .optimize = optimize 
 mod.addImport("meters", meters.module("meters"));
 ```
 
-### Phrases and events
+### Layers
 
-A `Phrase(N)` lists notes by bar, beat and duration. `toEvents` places them in time for a tempo, a time signature
-and a sample rate, and returns one `Event(N)` per note:
+A layer type is made of named columns. Each column is a primitive, a type with `ResolveT` and
+`resolve(self, ctx: meters.Context)` such as `meters.Span`, or a payload declared with `meters.Opaque(N)`. The order
+the columns are written in does not matter, and a column that is neither does not compile: a payload is never guessed
+from a missing `resolve`.
 
-- `position`: the note's `Position` (bar and beat), as written in the phrase.
-- `length`: how long the note lasts, in sample frames.
-- `note`: the payload, passed through unchanged.
+A score is built from small layers:
 
-An event keeps its position in bars and beats; `position.toSampleOffset`, called with the same tempo, time signature
-and sample rate, gives the frame it starts on.
+- `notate(values)` writes a layer of one column that is not placed in time, borrowing `values`.
+- `zip` pairs two layers element by element. A layer of one element that is not placed in time is broadcast onto every
+  element of the other one, so one note can be given to a whole bar of rhythm.
+- `concat`, `join` and `repeat` place layers one after another: each starts where the `extent` (in beats) of the ones
+  before it ends.
+- `map` transforms one column with a `transform.apply`, such as transposing the notes.
+
+`resolve` turns every element into one value per column, under the same names: a `Span` gives its `start` and
+`length` in frames, and a payload is passed through unchanged. The caller owns the returned slice; the other
+operations allocate too and never free their inputs, so a score is meant to be built with an arena.
 
 ```zig
 const std = @import("std");
@@ -85,57 +97,69 @@ const meters = @import("meters");
 
 // Any payload type works; a pitch type from another library, such as `pitches`, is typical.
 const Note = struct { name: []const u8, volume: f64 = 1.0 };
-const Phrase = meters.Phrase(Note);
 
-const melody: Phrase = .{
-    .name = "Melody",
-    .notes = &.{
-        .{ .bar = 0, .beat = 0.0, .note = .{ .name = "E4" }, .duration_beats = 1.0 },
-        .{ .bar = 0, .beat = 1.0, .note = .{ .name = "G4", .volume = 0.8 }, .duration_beats = 0.5 },
-    },
+const Rhythm = meters.Layer(.{ .span = meters.Span });
+const Notes = meters.Layer(.{ .note = meters.Opaque(Note) });
+
+// One beat: an eighth and two sixteenths.
+const gallop: Rhythm = .{
+    .columns = .{ .span = &.{ .{ .beat = 0.0, .beats = 0.5 }, .{ .beat = 0.5, .beats = 0.25 }, .{ .beat = 0.75, .beats = 0.25 } } },
+    .extent = 1.0,
 };
 
 pub fn main() !void {
-    const allocator = std.heap.page_allocator;
-    // 120 BPM, 4/4, 44100 Hz: a beat is 22050 frames
-    const events = try melody.toEvents(allocator, 120, .{}, 44100);
-    // The caller owns the returned slice.
-    defer allocator.free(events);
+    var arena: std.heap.ArenaAllocator = .init(std.heap.page_allocator);
+    defer arena.deinit();
+    const allocator = arena.allocator();
 
-    for (events) |event| {
-        const start = try event.position.toSampleOffset(120, .{}, 44100);
-        std.debug.print("{s}: frames {d}..{d}\n", .{ event.note.name, start, start + event.length });
+    // Two beats of gallops, all on E2, then one on G2.
+    const e2 = try (try gallop.repeat(allocator, 2)).zip(allocator, Notes.notate(&.{.{ .name = "E2" }}));
+    const g2 = try gallop.zip(allocator, Notes.notate(&.{.{ .name = "G2", .volume = 0.8 }}));
+    const score = try e2.concat(allocator, g2);
+
+    // 120 BPM, 4/4, 44100 Hz: a beat is 22050 frames
+    for (try score.resolve(allocator, .{ .bpm = 120, .sample_rate = 44100 })) |note| {
+        std.debug.print("{s}: frames {d}..{d}\n", .{ note.note.name, note.span.start, note.span.start + note.span.length });
     }
-    // E4: frames 0..22050
-    // G4: frames 22050..33075
+    // E2: frames 0..11025
+    // E2: frames 11025..16538
+    // E2: frames 16538..22050
+    // E2: frames 22050..33075
+    // ...
+    // G2: frames 60638..66150
 }
 ```
 
-### Phrases in ZON
+### Layers in ZON
 
-A phrase can be written as a ZON file and loaded at comptime, which keeps the score apart from the code. Fields left
-out take their defaults (`bar = 0`, `beat = 0.0`, `duration_beats = 1.0`):
+A layer can be written as a ZON file and loaded at comptime, which keeps the score apart from the code. Fields of a
+`Span` left out take their defaults (`bar = 0`, `beat = 0.0`, `beats = 1.0`):
 
 ```zig
 // melody.zon
 .{
-    .name = "Melody",
-    .notes = .{
-        .{ .bar = 0, .beat = 0.0, .note = .{ .name = "E4" }, .duration_beats = 1.0 },
-        .{ .bar = 0, .beat = 1.0, .note = .{ .name = "G4", .volume = 0.8 }, .duration_beats = 0.5 },
-        // bar 0 beat 5 carries into bar 1 beat 1
-        .{ .beat = 5.0, .note = .{ .name = "C5" } },
+    .columns = .{
+        .note = .{ .{ .name = "E4" }, .{ .name = "G4", .volume = 0.8 }, .{ .name = "C5" } },
+        .span = .{
+            .{ .bar = 0, .beat = 0.0, .beats = 1.0 },
+            .{ .bar = 0, .beat = 1.0, .beats = 0.5 },
+            // bar 0 beat 5 carries into bar 1 beat 1
+            .{ .beat = 5.0 },
+        },
     },
+    // The layer lasts two bars of 4/4 when concatenated.
+    .extent = 8.0,
 }
 ```
 
 ```zig
-const melody: Phrase = @import("melody.zon");
+const Melody = meters.Layer(.{ .span = meters.Span, .note = meters.Opaque(Note) });
+const melody: Melody = @import("melody.zon");
 ```
 
-### Positions without a phrase
+### Positions without a layer
 
-`Position` converts a single bar and beat to a frame offset, without building a phrase:
+`Position` converts a single bar and beat to a frame offset, without building a layer:
 
 ```zig
 const position: meters.Position = .{ .bar = 1, .beat = 2.0 };
