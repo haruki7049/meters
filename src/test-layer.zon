@@ -1,0 +1,20 @@
+// A layer for the ZON import test in layer.zig, written the way a consumer writes a score file.
+.{
+    .columns = .{
+        .note = .{
+            .{ .semitones = 0 },
+            .{ .semitones = 4 },
+            // A negative payload value
+            .{ .semitones = -12 },
+        },
+        .span = .{
+            // Every field written out
+            .{ .bar = 0, .beat = 0.0, .beats = 1.0 },
+            // bar, beat and beats left at their defaults (0, 0.0, 1.0)
+            .{},
+            // A beat past the bar (bar 1 beat 5 is bar 2 beat 1 in 4/4)
+            .{ .bar = 1, .beat = 5.0, .beats = 0.5 },
+        },
+    },
+    .extent = 8.0,
+}
