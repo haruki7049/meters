@@ -5,6 +5,10 @@
 //! segment it was written in; `Context.origin` places that segment. Its length is the offset of its
 //! end minus the offset of its start, never a length rounded on its own, so a note that ends where
 //! the next one starts tiles with it exactly, also across segments.
+//!
+//! The length is the note value written in `beats`, resolved to frames, and nothing more: `meters`
+//! hands it over as resolved and does not decide how long the note actually sounds. Whether that
+//! length is used as the sounding length or ignored is up to the instrument the user implements.
 
 const std = @import("std");
 const Context = @import("./context.zig");
@@ -25,7 +29,8 @@ beats: f64 = 1.0,
 pub const Frames = struct {
     /// The frame the note starts on, counted from bar 0 beat 0.
     start: usize,
-    /// How long the note lasts: the offset of its end minus the offset of its start.
+    /// The note value in frames: the offset of its end minus the offset of its start. Whether it is
+    /// used as the sounding length or ignored is up to the instrument the user implements.
     length: usize,
 };
 

@@ -1,11 +1,11 @@
-//! Layers of score information: named columns of primitives and payloads, notation, zip,
-//! concatenation and resolution.
+//! Layers of score information: named columns of primitives, notation, zip, concatenation and
+//! resolution.
 //!
 //! A primitive is any type with two declarations, `ResolveT` and
-//! `resolve(self, ctx: Context) ResolveT` (or an error union of `ResolveT`), such as `Span`. A
-//! payload is a value `meters` does not interpret, declared with the `Opaque(N)` marker and
-//! passed through unresolved. `Layer` builds a layer type from named columns at compile time;
-//! zip, concatenation and resolution are written once, here, and never read the data of a column.
+//! `resolve(self, ctx: Context) ResolveT` (or an error union of `ResolveT`), such as `Span` or a
+//! note the user writes. Every column of a layer is a primitive. `Layer` builds a layer type from
+//! named columns at compile time; zip, concatenation and resolution are written once, here, and
+//! never read the data of a column: each primitive resolves itself.
 //!
 //! A layer also carries where it sits in time: its `extent` in beats, and the `origins` of its
 //! elements. Concatenation places the second layer `extent` beats after the first one by adding to
@@ -19,7 +19,6 @@
 
 const std = @import("std");
 const Context = @import("./context.zig");
-const Opaque = @import("./opaque.zig").inner;
 
 /// Errors `zip` returns, besides the allocator's.
 pub const ZipError = error{
@@ -30,9 +29,9 @@ pub const ZipError = error{
 };
 
 /// Returns the layer type made of the given named columns, for example
-/// `Layer(.{ .span = Span, .note = Opaque(Note) })`. Each column is a primitive or an `Opaque`
-/// payload. Each combination of columns is its own type, and the order the columns are written in
-/// does not matter.
+/// `Layer(.{ .span = Span, .note = Note })`. Each column is a primitive; a type that does not
+/// keep the primitive contract does not compile. Each combination of columns is its own type, and
+/// the order the columns are written in does not matter.
 pub fn inner(comptime spec: anytype) type {
     const fields = @typeInfo(@TypeOf(spec)).@"struct".fields;
     var names: [fields.len][]const u8 = undefined;
@@ -45,26 +44,14 @@ pub fn inner(comptime spec: anytype) type {
     return Sorted(fields.len, names, types);
 }
 
-/// Whether `T` is an `Opaque` marker. Compares the type itself, so a primitive that happens to
-/// declare `Payload` is not taken for one.
-fn isOpaque(comptime T: type) bool {
-    switch (@typeInfo(T)) {
-        .@"struct", .@"enum", .@"union", .@"opaque" => {},
-        else => return false,
-    }
-    if (!@hasDecl(T, "Payload") or @TypeOf(T.Payload) != type) return false;
-
-    return T == Opaque(T.Payload);
-}
-
 /// Rejects, at compile time, a type that does not keep the primitive contract.
 fn assertPrimitive(comptime P: type) void {
     switch (@typeInfo(P)) {
         .@"struct", .@"enum", .@"union", .@"opaque" => {},
-        else => @compileError(@typeName(P) ++ " is not a primitive; declare a payload with `Opaque`"),
+        else => @compileError(@typeName(P) ++ " is not a primitive: it has no `ResolveT` and `resolve`"),
     }
-    if (!@hasDecl(P, "ResolveT")) @compileError(@typeName(P) ++ " is not a primitive: it has no `ResolveT`; declare a payload with `Opaque`");
-    if (!@hasDecl(P, "resolve")) @compileError(@typeName(P) ++ " is not a primitive: it has no `resolve`; declare a payload with `Opaque`");
+    if (!@hasDecl(P, "ResolveT")) @compileError(@typeName(P) ++ " is not a primitive: it has no `ResolveT`");
+    if (!@hasDecl(P, "resolve")) @compileError(@typeName(P) ++ " is not a primitive: it has no `resolve`");
 
     const info = @typeInfo(@TypeOf(P.resolve)).@"fn";
     if (info.params.len != 2 or info.params[1].type == null or info.params[1].type.? != Context)
@@ -78,20 +65,13 @@ fn assertPrimitive(comptime P: type) void {
     if (payload != P.ResolveT) @compileError(@typeName(P) ++ ".resolve must return `ResolveT` or an error union of it");
 }
 
-/// The type a column declared as `T` holds: the payload of an `Opaque` marker, or the primitive.
-fn Element(comptime T: type) type {
-    return if (isOpaque(T)) T.Payload else T;
-}
-
-/// The type a column declared as `T` resolves to: the payload itself, or the primitive's `ResolveT`.
+/// The type a column of the primitive `T` resolves to: its `ResolveT`.
 fn Output(comptime T: type) type {
-    return if (isOpaque(T)) T.Payload else T.ResolveT;
+    return T.ResolveT;
 }
 
-/// The errors resolving a column declared as `T` can return; none for a payload.
+/// The errors resolving a column of the primitive `T` can return.
 fn Errors(comptime T: type) type {
-    if (isOpaque(T)) return error{};
-
     return switch (@typeInfo(@typeInfo(@TypeOf(T.resolve)).@"fn".return_type.?)) {
         .error_union => |error_union| error_union.error_set,
         else => error{},
@@ -118,7 +98,7 @@ fn Sorted(comptime n: usize, comptime names: [n][]const u8, comptime types: [n]t
     var sorted_names: [n][]const u8 = undefined;
     var sorted_types: [n]type = undefined;
     for (order, 0..) |from, to| {
-        if (!isOpaque(types[from])) assertPrimitive(types[from]);
+        assertPrimitive(types[from]);
         sorted_names[to] = names[from];
         sorted_types[to] = types[from];
     }
@@ -150,23 +130,22 @@ fn SliceOf(comptime T: type) type {
 }
 
 /// The layer type of a sorted spec `S`: a struct with one field per column, holding the column's
-/// declared type (a primitive or an `Opaque` marker).
+/// primitive.
 fn LayerOf(comptime S: type) type {
     const specs = @typeInfo(S).@"struct".fields;
-    const E = Mapped(S, Element);
+    const E = S;
     const fields = @typeInfo(E).@"struct".fields;
 
     return struct {
         const Self = @This();
 
-        /// The declared type of each column: a primitive or an `Opaque` marker.
+        /// The primitive of each column.
         pub const Spec = S;
         /// One element: one value per column.
         pub const Item = E;
         /// One slice per column.
         pub const Columns = Mapped(E, SliceOf);
-        /// One resolved value per column, under the same names: the `ResolveT` of a primitive, or
-        /// the payload itself.
+        /// One resolved value per column, under the same names: the `ResolveT` of its primitive.
         pub const Resolved = Mapped(S, Output);
         /// Names a column of this layer, for `map`.
         pub const Name = std.meta.FieldEnum(E);
@@ -190,7 +169,7 @@ fn LayerOf(comptime S: type) type {
         /// One slice per column, all with the same number of elements.
         columns: Columns,
         /// Length of this layer in beats: a layer concatenated after this one starts this many
-        /// beats later. Zero for a layer that is not placed in time, such as a list of payloads.
+        /// beats later. Zero for a layer that is not placed in time, such as a list of notes.
         extent: f64 = 0.0,
         /// Beats from the start of this layer to the start of the segment each element was written
         /// in, one per element. Set by concatenation; empty means zero for every element.
@@ -368,8 +347,8 @@ fn LayerOf(comptime S: type) type {
         }
 
         /// Returns this layer with every element of the column `name` replaced by
-        /// `transform.apply(element)`. `apply` takes and returns the column's element type (the
-        /// primitive, or the payload of an `Opaque` column), or an error union of it. Shifting,
+        /// `transform.apply(element)`. `apply` takes and returns the column's primitive, or an
+        /// error union of it. Shifting,
         /// transposing and other transformations of score information are written as such a
         /// `transform`, next to the type they understand. The caller owns the returned slice.
         pub fn map(self: Self, allocator: std.mem.Allocator, comptime name: Name, transform: anytype) MapError(@TypeOf(transform))!Self {
@@ -390,9 +369,8 @@ fn LayerOf(comptime S: type) type {
         }
 
         /// Resolves every element: each primitive's `resolve` is called with `ctx`, whose origin is
-        /// moved to the origin of the element, and each payload is passed through unchanged.
-        /// Returns the first error a primitive returns, and frees what it allocated. The caller
-        /// owns the returned slice.
+        /// moved to the origin of the element. Returns the first error a primitive returns, and
+        /// frees what it allocated. The caller owns the returned slice.
         pub fn resolve(self: Self, allocator: std.mem.Allocator, ctx: Context) ResolveError![]Resolved {
             const out = try allocator.alloc(Resolved, self.count());
             errdefer allocator.free(out);
@@ -401,13 +379,8 @@ fn LayerOf(comptime S: type) type {
                 var element_ctx = ctx;
                 element_ctx.origin = ctx.origin + originAt(self.origins, n);
                 inline for (specs) |spec| {
-                    const element = @field(self.columns, spec.name)[n];
-                    if (comptime isOpaque(spec.type)) {
-                        @field(item, spec.name) = element;
-                    } else {
-                        const value = element.resolve(element_ctx);
-                        @field(item, spec.name) = if (@typeInfo(@TypeOf(value)) == .error_union) try value else value;
-                    }
+                    const value = @field(self.columns, spec.name)[n].resolve(element_ctx);
+                    @field(item, spec.name) = if (@typeInfo(@TypeOf(value)) == .error_union) try value else value;
                 }
             }
 
@@ -420,9 +393,17 @@ fn LayerOf(comptime S: type) type {
 
 const Span = @import("./span.zig");
 
-/// A pitch-like payload: semitones from A4. `meters` itself knows no pitch type.
+/// A primitive of the tests: a pitch-like note, semitones from A4, that resolves to itself.
+/// `meters` itself knows no pitch type.
 const Note = struct {
     semitones: i32,
+
+    pub const ResolveT = Note;
+
+    pub fn resolve(self: Note, ctx: Context) ResolveT {
+        _ = ctx;
+        return self;
+    }
 };
 
 /// Moves a note by a number of semitones.
@@ -457,14 +438,14 @@ const Halve = struct {
 };
 
 const Rhythm = inner(.{ .span = Span });
-const Notes = inner(.{ .note = Opaque(Note) });
+const Notes = inner(.{ .note = Note });
 const Gains = inner(.{ .gain = Gain });
 
 // 120 BPM, 44100 Hz: a beat is 22050 frames.
 const test_ctx: Context = .{ .bpm = 120, .sample_rate = 44100 };
 
 test "zip pairs layers by name, and the order does not change the type" {
-    const Score = inner(.{ .span = Span, .note = Opaque(Note), .gain = Gain });
+    const Score = inner(.{ .span = Span, .note = Note, .gain = Gain });
     const rhythm: Rhythm = .{ .columns = .{ .span = &.{ .{ .beat = 0.0 }, .{ .beat = 1.0 } } }, .extent = 2.0 };
     const notes = Notes.notate(&.{ .{ .semitones = 0 }, .{ .semitones = 7 } });
     const accents = Gains.notate(&.{ .{ .value = 1.0 }, .{ .value = 0.5 } });
@@ -474,21 +455,17 @@ test "zip pairs layers by name, and the order does not change the type" {
     const reordered = try (try accents.zip(allocator, notes)).zip(allocator, rhythm);
     comptime std.debug.assert(@TypeOf(score) == Score);
     comptime std.debug.assert(@TypeOf(reordered) == Score);
-    comptime std.debug.assert(inner(.{ .gain = Gain, .note = Opaque(Note), .span = Span }) == Score);
+    comptime std.debug.assert(inner(.{ .gain = Gain, .note = Note, .span = Span }) == Score);
 
     try std.testing.expectEqual(@as(usize, 2), score.count());
     try std.testing.expectEqual(@as(f64, 2.0), score.extent);
 }
 
-test "an Opaque column holds bare payloads" {
+test "a column holds its primitive and resolves to its ResolveT" {
     comptime std.debug.assert(@FieldType(Notes.Item, "note") == Note);
     comptime std.debug.assert(@FieldType(Notes.Columns, "note") == []const Note);
-    comptime std.debug.assert(@FieldType(Notes.Resolved, "note") == Note);
-
-    // Any payload type works, such as a drum voice.
-    const Drum = enum { kick, snare };
-    const Hits = inner(.{ .drum = Opaque(Drum) });
-    comptime std.debug.assert(@FieldType(Hits.Resolved, "drum") == Drum);
+    comptime std.debug.assert(@FieldType(Notes.Resolved, "note") == Note.ResolveT);
+    comptime std.debug.assert(@FieldType(Gains.Resolved, "gain") == f64);
 }
 
 test "zip returns an error for different counts" {
@@ -792,7 +769,7 @@ test "map transforms one column and keeps the others" {
     const rhythm: Rhythm = .{ .columns = .{ .span = &.{ .{}, .{ .beat = 1.0 } } }, .extent = 2.0 };
     const melody = try rhythm.zip(allocator, Notes.notate(&.{ .{ .semitones = 0 }, .{ .semitones = 7 } }));
 
-    // A transform written for the payload type works on an Opaque column as it is.
+    // A transform written for the primitive works on its column as it is.
     const up = try melody.map(allocator, .note, Transpose{ .semitones = 12 });
     try std.testing.expectEqual(@as(i32, 12), up.columns.note[0].semitones);
     try std.testing.expectEqual(@as(i32, 19), up.columns.note[1].semitones);
@@ -818,7 +795,7 @@ test "resolve returns one named value per column" {
     const notes = Notes.notate(&.{ .{ .semitones = 0 }, .{ .semitones = 12 } });
     const resolved = try (try rhythm.zip(allocator, notes)).resolve(allocator, test_ctx);
 
-    // 120 BPM, 44100 Hz: a beat is 22050 frames. The payload passes through unchanged.
+    // 120 BPM, 44100 Hz: a beat is 22050 frames. The note resolves to itself.
     try std.testing.expectEqual(@as(usize, 0), resolved[0].span.start);
     try std.testing.expectEqual(@as(usize, 22050), resolved[0].span.length);
     try std.testing.expectEqual(Note{ .semitones = 0 }, resolved[0].note);
@@ -828,9 +805,9 @@ test "resolve returns one named value per column" {
 }
 
 test "resolve declares the errors of every primitive" {
-    const Score = inner(.{ .span = Span, .gain = Gain, .note = Opaque(Note) });
+    const Score = inner(.{ .span = Span, .gain = Gain, .note = Note });
     comptime std.debug.assert(Score.ResolveError == (std.mem.Allocator.Error || Span.ResolveError || error{NegativeGain}));
-    // A layer of payloads only fails for memory alone.
+    // A layer of primitives that cannot fail only fails for memory.
     comptime std.debug.assert(Notes.ResolveError == std.mem.Allocator.Error);
 }
 
@@ -889,7 +866,7 @@ test "resolve tiles back-to-back notes across segments" {
 
 test "a layer imports a ZON file" {
     const allocator = std.testing.allocator;
-    const Score = inner(.{ .span = Span, .note = Opaque(Note) });
+    const Score = inner(.{ .span = Span, .note = Note });
     const score: Score = @import("./test-layer.zon");
 
     try std.testing.expectEqual(@as(usize, 3), score.count());
