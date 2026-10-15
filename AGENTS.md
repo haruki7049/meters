@@ -6,7 +6,7 @@ ______________________________________________________________________
 
 ## 1. Project Overview & Architecture
 
-`meters` is a minimal score structure library in Zig. It describes *when* a note sounds and *for how long*; it does not know what a note is, and it does not synthesize, mix, or write audio.
+`meters` is a minimal score structure library in Zig. It describes *when* a note is struck and its *note value*; it does not know what a note is, and it does not synthesize, mix, or write audio.
 
 - **Pure Zig, `std` Only**: `build.zig.zon` has no dependencies, and it must stay that way. Do not add `lightmix` or any other package; audio belongs to the downstream libraries.
 - **Library Package**: The public module is registered as `meters` via `b.addModule` in `build.zig`, so downstream projects consume it with `b.dependency("meters", .{})`.
