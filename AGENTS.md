@@ -73,7 +73,7 @@ ______________________________________________________________________
   - `PascalCase` for types and for files imported as a struct (`Position`, `TimeSignature`).
   - `camelCase` for functions and methods (`toSampleOffset`, `notate`, `resolve`).
   - `snake_case` for variables, parameters, struct fields and enum tags (`sample_rate`, `duration_beats`, `.cs`).
-  - Comptime type parameters are always a single uppercase character (`N` for a note type). Multi-character names such as `comptime SampleType: type` are prohibited.
+  - Comptime type parameters are always a single uppercase character (`P` for a primitive type, `T` for a transform). Multi-character names such as `comptime SampleType: type` are prohibited.
   - Error tags are `PascalCase` (`error.InvalidPosition`, `error.InvalidBpm`, `error.InvalidSampleRate`).
 - **Generic Factories**: A type parameterized by comptime types is defined as `pub fn inner(...) type` in its own file and re-exported under its `PascalCase` name in `root.zig` (`pub const Layer = @import("./layer.zig").inner;`).
 - **Tests**: Keep tests next to the code they cover, in the same file (a ZON fixture such as `src/test-layer.zon` sits next to the test that imports it). Every file ends with `test { std.testing.refAllDecls(@This()); }`. A test that checks a numeric result states the expected value and how it was derived in a comment (e.g. `// 60 BPM, 44100 Hz => spb = 44100`).
