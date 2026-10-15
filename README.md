@@ -6,7 +6,7 @@ Pure Zig with no dependencies beyond `std`. Requires Zig `0.16.0`.
 
 `meters` handles time and placement only: bars, beats, time signatures, tempo, and layers of score information placed
 in time. It does not know what a note is. A score is a `Layer` of named columns: `Span` says when each note starts and
-its note value, and how the note is struck (a pitch, how strong, open or closed, ...) is a column of its own. Every
+its note value, and how the note is struck (high or low, how strong, open or closed, ...) is a column of its own. Every
 column is a primitive: a type with `ResolveT` and `resolve(self, ctx: meters.Context)` that the consumer writes and
 that resolves itself, without `meters` reading it.
 
