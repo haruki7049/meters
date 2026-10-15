@@ -72,7 +72,7 @@ ______________________________________________________________________
 - **Naming**:
   - `PascalCase` for types and for files imported as a struct (`Position`, `TimeSignature`).
   - `camelCase` for functions and methods (`toSampleOffset`, `notate`, `resolve`).
-  - `snake_case` for variables, parameters, struct fields and enum tags (`sample_rate`, `duration_beats`, `.cs`).
+  - `snake_case` for variables, parameters, struct fields and enum tags (`sample_rate`, `time_signature`, `origins`).
   - Comptime type parameters are always a single uppercase character (`N` for a note type). Multi-character names such as `comptime SampleType: type` are prohibited.
   - Error tags are `PascalCase` (`error.InvalidPosition`, `error.InvalidBpm`, `error.InvalidSampleRate`).
 - **Generic Factories**: A type parameterized by comptime types is defined as `pub fn inner(...) type` in its own file and re-exported under its `PascalCase` name in `root.zig` (`pub const Layer = @import("./layer.zig").inner;`).
