@@ -46,7 +46,7 @@ sequencer   schedules lightmix waves on tracks, micro-fades overlaps, renders au
 
 | Symbol | Description |
 | :--- | :--- |
-| `Layer(spec)` | A layer of named columns placed in time: `notate`, `zip`, `concat`, `join`, `repeat`, `map`, `resolve` |
+| `Layer(spec)` | A layer of named columns, placed in time or not: `notate`, `zip`, `concat`, `join`, `repeat`, `map`, `resolve` |
 | `Span` | The time primitive: `bar`, `beat` and `beats`, resolved to a `start` frame and a `length` in frames |
 | `Context` | What a primitive resolves itself with: `bpm`, `time_signature`, `sample_rate`, and the element's `origin` |
 | `ZipError` | Errors of `zip`, besides the allocator's |
