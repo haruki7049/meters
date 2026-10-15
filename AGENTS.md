@@ -20,7 +20,7 @@ ______________________________________________________________________
   - `tempo.zig`: `samplesPerBeat` (a beat of a time signature) and `framesFromBeats`, the only beat-to-frame conversion, with `tempo.Error`.
   - `context.zig`: `Context`, what a primitive resolves itself with: `bpm`, `time_signature`, `sample_rate` and the `origin` of the element.
   - `span.zig`: `Span`, the time primitive (`bar`, `beat`, `beats`), resolved to a start frame and a length in frames.
-  - `layer.zig`: `Layer(spec)`, a layer of named columns placed in time, with `notate`, `zip`, `concat`, `join`, `repeat`, `map` and `resolve`, and `ZipError`.
+  - `layer.zig`: `Layer(spec)`, a layer of named columns, placed in time or not (`notate` writes one that is not), with `notate`, `zip`, `concat`, `join`, `repeat`, `map` and `resolve`, and `ZipError`.
 - **Domain Conventions**:
   - BPM always counts quarter notes; `TimeSignature.denominator` scales the beat length (an 8th-note beat is half a quarter).
   - Bars are 0-indexed. `beat` is an `f64` offset from the start of the bar. A beat at or past the numerator is valid and carries into the following bars (in 4/4, bar 0 beat 5 is bar 1 beat 1), so computed beat offsets can be used as they are; do not reject or wrap them.
