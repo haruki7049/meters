@@ -104,8 +104,9 @@ A score is built from small layers:
 - `map` transforms one column with a `transform.apply`, such as transposing the notes.
 
 `resolve` turns every element into one value per column, under the same names: each primitive gives its `ResolveT`,
-and a `Span` gives its `start` and `length` in frames. The caller owns the returned slice; the other
-operations allocate too and never free their inputs, so a score is meant to be built with an arena.
+and a `Span` gives its `start` and `length` in frames. The caller owns the returned slice. `concat`, `join`, `repeat`
+and `map` allocate too, `zip` allocates only to broadcast a layer of one element, and `notate` allocates nothing; no
+operation frees its inputs, so a score is meant to be built with an arena.
 
 ```zig
 const std = @import("std");
