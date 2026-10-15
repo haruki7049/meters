@@ -6,7 +6,7 @@ ______________________________________________________________________
 
 ## 1. Project Overview & Architecture
 
-`meters` is a minimal score structure library in Zig. It describes *when* a note sounds and *for how long*; it does not know what a note is, and it does not synthesize, mix, or write audio.
+`meters` is a minimal score structure library in Zig. It describes *when* a note is struck and its *note value*; it does not know what a note is, and it does not synthesize, mix, or write audio.
 
 - **Pure Zig, `std` Only**: `build.zig.zon` has no dependencies, and it must stay that way. Do not add `lightmix` or any other package; audio belongs to the downstream libraries.
 - **Library Package**: The public module is registered as `meters` via `b.addModule` in `build.zig`, so downstream projects consume it with `b.dependency("meters", .{})`.
@@ -20,11 +20,11 @@ ______________________________________________________________________
   - `tempo.zig`: `samplesPerBeat` (a beat of a time signature) and `framesFromBeats`, the only beat-to-frame conversion, with `tempo.Error`.
   - `context.zig`: `Context`, what a primitive resolves itself with: `bpm`, `time_signature`, `sample_rate` and the `origin` of the element.
   - `span.zig`: `Span`, the time primitive (`bar`, `beat`, `beats`), resolved to a start frame and a length in frames.
-  - `layer.zig`: `Layer(spec)`, a layer of named columns placed in time, with `notate`, `zip`, `concat`, `join`, `repeat`, `map` and `resolve`, and `ZipError`.
+  - `layer.zig`: `Layer(spec)`, a layer of named columns, placed in time or not (`notate` writes one that is not), with `notate`, `zip`, `concat`, `join`, `repeat`, `map` and `resolve`, and `ZipError`.
 - **Domain Conventions**:
   - BPM always counts quarter notes; `TimeSignature.denominator` scales the beat length (an 8th-note beat is half a quarter).
   - Bars are 0-indexed. `beat` is an `f64` offset from the start of the bar. A beat at or past the numerator is valid and carries into the following bars (in 4/4, bar 0 beat 5 is bar 1 beat 1), so computed beat offsets can be used as they are; do not reject or wrap them.
-  - A note's length is the offset of its end minus the offset of its start (`Span.resolve` rounds `bar_start + (beat + beats)` and `bar_start + beat` and subtracts), never a length rounded on its own, so back-to-back notes tile with no frame of gap or overlap.
+  - The `length` a `Span` resolves to, its note value in frames, is the offset of its end minus the offset of its start (`Span.resolve` rounds `bar_start + (beat + beats)` and `bar_start + beat` and subtracts), never a length rounded on its own, so back-to-back notes tile with no frame of gap or overlap.
   - Timing conversions compute in `f64` and convert to an integer frame once, at the end, with `@round`. Do not truncate, and do not round an intermediate value such as samples per beat before multiplying it.
   - Positions and lengths use one beat, the beat of the time signature: every beat-to-frame conversion goes through `tempo.samplesPerBeat` and `tempo.framesFromBeats`. Do not compute a beat length or a frame count anywhere else, and do not change the order of operations in `samplesPerBeat`, which decides how offsets round.
   - `Layer` never reads the data of a column: every column is a primitive (`ResolveT` and `resolve(self, ctx: Context)`), written by the consumer or provided as `Span`, and resolves itself, or the layer type does not compile. Do not add a marker or any other way to pass a column through unresolved.
@@ -72,7 +72,7 @@ ______________________________________________________________________
 - **Naming**:
   - `PascalCase` for types and for files imported as a struct (`Position`, `TimeSignature`).
   - `camelCase` for functions and methods (`toSampleOffset`, `notate`, `resolve`).
-  - `snake_case` for variables, parameters, struct fields and enum tags (`sample_rate`, `duration_beats`, `.cs`).
+  - `snake_case` for variables, parameters, struct fields and enum tags (`sample_rate`, `time_signature`, `origins`).
   - Comptime type parameters are always a single uppercase character (`P` for a primitive type, `T` for a transform). Multi-character names such as `comptime SampleType: type` are prohibited.
   - Error tags are `PascalCase` (`error.InvalidPosition`, `error.InvalidBpm`, `error.InvalidSampleRate`).
 - **Generic Factories**: A type parameterized by comptime types is defined as `pub fn inner(...) type` in its own file and re-exported under its `PascalCase` name in `root.zig` (`pub const Layer = @import("./layer.zig").inner;`).

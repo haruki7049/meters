@@ -1,9 +1,9 @@
 //! Minimal score structure: time signatures, tempo conversion, positions, and layers of score
 //! information placed in time.
 //!
-//! Pure Zig (std only). `meters` handles only time and placement: what a note is and how it
-//! sounds are left to the consumer, through primitives the consumer writes, which resolve
-//! themselves without `meters` reading them.
+//! Pure Zig (std only). `meters` handles only time and placement, and provides `Span`, the time
+//! primitive: what a note is and how it sounds are left to the consumer, through note primitives
+//! the consumer writes, which resolve themselves without `meters` reading them.
 
 const std = @import("std");
 

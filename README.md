@@ -7,8 +7,8 @@ Pure Zig with no dependencies beyond `std`. Requires Zig `0.16.0`.
 `meters` handles time and placement only: bars, beats, time signatures, tempo, and layers of score information placed
 in time. It does not know what a note is. A score is a `Layer` of named columns: `Span` says when each note starts and
 its note value, and how the note is struck (a pitch, how strong, open or closed, ...) is a column of its own. Every
-column is a primitive: a type with `ResolveT` and `resolve(self, ctx: meters.Context)` that the consumer writes and
-that resolves itself, without `meters` reading it.
+column is a primitive: a type with `ResolveT` and `resolve(self, ctx: meters.Context)` that resolves itself, without
+`meters` reading it. `meters` provides `Span`; the other primitives, such as notes, the consumer writes.
 
 ## One score per vibrating body
 
@@ -46,7 +46,7 @@ sequencer   schedules lightmix waves on tracks, micro-fades overlaps, renders au
 
 | Symbol | Description |
 | :--- | :--- |
-| `Layer(spec)` | A layer of named columns placed in time: `notate`, `zip`, `concat`, `join`, `repeat`, `map`, `resolve` |
+| `Layer(spec)` | A layer of named columns, placed in time or not: `notate`, `zip`, `concat`, `join`, `repeat`, `map`, `resolve` |
 | `Span` | The time primitive: `bar`, `beat` and `beats`, resolved to a `start` frame and a `length` in frames |
 | `Context` | What a primitive resolves itself with: `bpm`, `time_signature`, `sample_rate`, and the element's `origin` |
 | `ZipError` | Errors of `zip`, besides the allocator's |
@@ -104,8 +104,9 @@ A score is built from small layers:
 - `map` transforms one column with a `transform.apply`, such as transposing the notes.
 
 `resolve` turns every element into one value per column, under the same names: each primitive gives its `ResolveT`,
-and a `Span` gives its `start` and `length` in frames. The caller owns the returned slice; the other
-operations allocate too and never free their inputs, so a score is meant to be built with an arena.
+and a `Span` gives its `start` and `length` in frames. The caller owns the returned slice. `concat`, `join`, `repeat`
+and `map` allocate too, `zip` allocates only to broadcast a layer of one element, and `notate` allocates nothing; no
+operation frees its inputs, so a score is meant to be built with an arena.
 
 ```zig
 const std = @import("std");
